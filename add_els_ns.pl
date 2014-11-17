@@ -32,8 +32,16 @@ my %ADDABLE_NS = (
 
 # lecture XML en entrée
 # ----------------------
-# unique argument : chemin fichier en entrée
-my $filepath = $ARGV[0] || die "ERR: veuillez fournir un nom de fichier en entrée\n" ;
+
+# unique argument attendu : chemin fichier input
+my $filepath = undef ;
+
+if ((not defined ($ARGV[0])) || ($ARGV[0] =~ /--?h(?:elp)?/)) {
+	HELP_MESSAGE() ;
+}
+else {
+	$filepath = $ARGV[0] ;
+}
 
 # slurp FILE => $content
 my $content = "" ;
@@ -120,3 +128,42 @@ if (scalar(@remaining_ns)) {
 #  - sinon on lui a substitué sont tag 'root' par un semblable avec
 #    insertion des déclarations ns manquantes
 print $content ;
+
+
+
+
+# renvoie le message d'aide
+# -------------------------
+sub HELP_MESSAGE {
+	print <<EOT;
+	
+------------------------------------------------------------
+|    Ajout des namespaces manquants dans XML Elsevier      |
+|----------------------------------------------------------|
+| Usage                                                    |
+| =====                                                    |
+|   perl add_els_ns.pl from_elsevier.xml > repaired.xml    |
+|                                                          |
+| Principe                                                 |
+| ========                                                 |
+|  Le script liste par regexp les namespaces (NS) utilisés |
+|  réellement dans les balises de ce document.             |
+|  Ensuite il compare avec la liste des NS déclarés dans   |
+|  la balise racine <article..> ou <converted-article..>   |
+|                                                          |
+|  Vitesse sur ma machine : 24 docs /s                     |
+|                                                          |
+| Sortie                                                   |
+| =======                                                  |
+|  Le doc est renvoyé tel quel si tous les NS étaient bien |
+|  déclarés.                                               |
+|  Sinon on lui remplace sa balise racine par une autre    |
+|  qui reprend les mêmes infos + les déclarations pour     | 
+|  les préfixes manquants.                                 |
+|                                                          |
+|----------------------------------------------------------|
+|  © 2014 Inist-CNRS (ISTEX)  romain.loth at inist dot fr  |
+------------------------------------------------------------
+EOT
+	exit 0 ;
+}
