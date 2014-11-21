@@ -13,7 +13,7 @@ binmode(STDOUT, ":utf8");
 use Encode ;
 use Unicode::Normalize ;
 
-use HTML::Entities ;
+use HTML::HTML5::Entities;
 
 my $opts = {} ;
 getopts('hadexw', $opts) ;
@@ -54,7 +54,7 @@ while (<>) {
 		s/&#0062;/___gt___/g ;
 		s/&#x003E;/___gt___/g ;
 		
-		# use HTML::Entities ;
+		# use HTML::HTML5::Entities;
 		decode_entities($_);
 		
 		s/___amp___/&amp;/g ;
@@ -63,7 +63,7 @@ while (<>) {
 	}
 	
 	if ($convertEntis) {
-		# use HTML::Entities ;
+		# use HTML::HTML5::Entities;
 		decode_entities($_);
 	}
 
