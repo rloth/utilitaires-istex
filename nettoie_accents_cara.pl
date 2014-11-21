@@ -1,6 +1,7 @@
 #! /usr/bin/perl -w
 
-# cf. aussi commande: echo 'char' | tlu.pl -o uf
+# cf. aussi commandes : echo 'char' | od -ctx1      (octet par octet, en hex)
+#                  et : echo 'char' | tlu.pl -o uf  (caractère utf8 par caractère utf8)
 
 use warnings ;
 use strict ;
@@ -23,7 +24,12 @@ HELP_MESSAGE() if ($opts->{h}) ;
 my $joinAcct     = $opts->{a} || 0 ;
 my $removeAcct   = $opts->{d} || 0 ;
 my $convertEntis = $opts->{e} || 0 ;
+my $convertEntisKeepXML = $opts->{x} || 0 ;
 my $replaceWeird  = $opts->{w} || 0 ;
+
+if ($convertEntisKeepXML && $convertEntis) {
+	die "les options -e et -x s'excluent mutuellement : il faut choisir !\n";
+}
 
 while (<>) {
 
@@ -31,7 +37,33 @@ while (<>) {
 	$_ = decode('UTF-8', $_);
 
 	# avant la suite pour que les entités décodées puissent aussi être translittérées
+	if ($convertEntisKeepXML) {
+		
+		# pour préserver '&' sous sa forme &amp;
+		s/&amp;/___amp___/g ;
+		s/&#0038;/___amp___/g ;
+		s/&#x0026;/___amp___/g ;
+		
+		# pour préserver '<' sous sa forme &lt;
+		s/&lt;/___lt___/g ;
+		s/&#0060;/___lt___/g ;
+		s/&#x003C;/___lt___/g ;
+		
+		# pour préserver '>' sous sa forme &gt;
+		s/&gt;/___gt___/g ;
+		s/&#0062;/___gt___/g ;
+		s/&#x003E;/___gt___/g ;
+		
+		# use HTML::Entities ;
+		decode_entities($_);
+		
+		s/___amp___/&amp;/g ;
+		s/___lt___/&lt;/g ;
+		s/___gt___/&gt;/g ;
+	}
+	
 	if ($convertEntis) {
+		# use HTML::Entities ;
 		decode_entities($_);
 	}
 
@@ -328,6 +360,9 @@ sub HELP_MESSAGE {
    -a     joindre les accents séparés    ex:  e + ´ => é
    -d     tout désaccentuer              ex: [ÀÁÂÄÅĄ] => A
    -e     convertir les entités html     ex: &eacute; => é
+   -x     convertir les entités html        / ex: &eacute; => é
+          sauf &lt; &gt; et &amp; ainsi    {      &lt;     => &lt;
+          que leurs variantes &#0060; etc.  \\     &#0060;  => &lt;
    -w     remplacer les caras bizarres   ex: (œ ▪ » € etc)
 --------------------------------------------------------------
 EOT
