@@ -16,7 +16,7 @@ use Unicode::Normalize ;
 use HTML::Entities ;
 
 my $opts = {} ;
-getopts('hadew', $opts) ;
+getopts('hadexw', $opts) ;
 
 # -h ou --help
 HELP_MESSAGE() if ($opts->{h}) ;
@@ -197,18 +197,25 @@ while (<>) {
 		s/ǉ/lj/g ;
 		s/Ǌ/NJ/g ;
 		s/ǌ/nj/g ;
-		s/Œ/OE/g ;
-		s/œ/oe/g ;
+		#~ s/Œ/OE/g ;
+		#~ s/œ/oe/g ;
 		s//oe/g ;   # U+009C (cara contrôle vu comme oe)
 		s/ﬆ/st/g ;
 		s/Ꜩ/Tz/g ;
 		s/ꜩ/tz/g ;
 
+		# diachro islande
+		# 	s/Ꜵ/AO/g ;
+		# 	s/ꜵ/ao/g ;
+		# 	s/Ꜷ/AU/g ;
+		# 	s/ꜷ/au/g ;
+		# 	s/Ꜹ/AV/g ;
+		# 	s/ꜹ/av/g ;
+		# 	s/Ꜽ/AY/g ;
+		# 	s/ꜽ/ay/g ;
+		# 	s/Ꝏ/OO/g ;
+		# 	s/ꝏ/oo/g ;
 		
-		# alternative en 2 lignes qui marche pour tous sauf pour [ŁłĐđŦŧĦħ]
-		# (méthode en utilisant la décomposition des combos unicodes cara + accent)
-		## $_ = Unicode::Normalize::NFKD($_);
-		## s/\p{NonspacingMark}//g;
 		
 		# Divers
 		# -------
@@ -226,21 +233,6 @@ while (<>) {
 		s/•/*/g ;
 		s/·/*/g ;
 		s/☽/*/g ;
-	# 	 s//*/g ;
-	# 	 s//*/g ;
-	# 	 s//*/g ;
-
-		# diachro islande
-		# 	s/Ꜵ/AO/g ;
-		# 	s/ꜵ/ao/g ;
-		# 	s/Ꜷ/AU/g ;
-		# 	s/ꜷ/au/g ;
-		# 	s/Ꜹ/AV/g ;
-		# 	s/ꜹ/av/g ;
-		# 	s/Ꜽ/AY/g ;
-		# 	s/ꜽ/ay/g ;
-		# 	s/Ꝏ/OO/g ;
-		# 	s/ꝏ/oo/g ;
 	}
 
  print ;
@@ -350,21 +342,27 @@ sub spacing_to_combining_accent {
 
 sub HELP_MESSAGE {
 	print <<EOT;
---------------------------------------------------------------
- Suppression des accents et/ou des caractères utf8 atypiques
---------------------------------------------------------------
+---------------------------------------------------------------------
+    Suppression des accents et/ou des caractères utf8 atypiques
+---------------------------------------------------------------------
  Usage:
-      nettoieAccentsCara.pl < input.txt > output.txt
+      nettoie_accents_cara.pl [SWITCHES] < input.txt > output.txt
 
  Options:
-   -a     joindre les accents séparés    ex:  e + ´ => é
-   -d     tout désaccentuer              ex: [ÀÁÂÄÅĄ] => A
-   -e     convertir les entités html     ex: &eacute; => é
-   -x     convertir les entités html        / ex: &eacute; => é
-          sauf &lt; &gt; et &amp; ainsi    {      &lt;     => &lt;
-          que leurs variantes &#0060; etc.  \\     &#0060;  => &lt;
-   -w     remplacer les caras bizarres   ex: (œ ▪ » € etc)
---------------------------------------------------------------
+   -e     convertir les entités html           ex: &eacute; => é
+   -x     convertir les entités html sauf   /  ex: &eacute; => é
+          les 3 &lt; &gt; et &amp; ou      {       &lt;     => &lt;
+          leurs variantes &#0060; etc.      \\      &#0060;  => &lt;
+   -a     joindre les accents séparés          ex:  e + ´ => é
+   -d     tout désaccentuer                    ex: [ÀÁÂÄÅĄ] => A
+   -w     remplacer les caras bizarres         ex: (ﬁ ▪ » € etc)
+
+ Par exemple pour convertir les entités html sauf '<' '>' et '&' :
+
+      nettoie_accents_cara.pl -x < input.txt > output.txt
+---------------------------------------------------------------------
+ © 2009-12 Modyco-CNRS (Nanterre)        romain.loth at inist dot fr 
+---------------------------------------------------------------------
 EOT
 	exit 0 ;
 }
