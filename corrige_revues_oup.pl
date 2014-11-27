@@ -13,17 +13,20 @@
 # antidote:
 # ==> on a tout intérêt à stocker la suite en tabulé (aka tsv)
 # ==>           et à re-remplacer comme cela :
-# ==>                  s/__PVIRG__/;/
+# ==>                  s/__PVIRG__/;/g
 # ---------------------------------------------------------------
 
 use warnings ;
 use strict ; 
 
+# switch manuel
+my $debug = 0 ;
+
 ##########################  MAIN  #################################
 
-# les 24 revues OUP ayant un point-virgule
+# les 24 revues OUP ayant un ou deux point(s)-virgule(s)
 # (on ignorera les 155 autres inoffensives)
-my @revuescoup = (
+my @revuescoup_1p = (
    "African Affairs, 1901-2010 (v1-v109; vVI-vXXXVIII)" ,
    "British Journal for the Philosophy of Science, The, 1950-2010 (v1-v61; vI-vXVI)" ,
    "Cambridge Quarterly, The, 1965-2010 (v30-v39; vI-vXXVII)" ,
@@ -36,9 +39,6 @@ my @revuescoup = (
    "Journal of Semitic Studies , 1956-2010 (v1-v55; vXI-XXXVIII)" ,
    "Journal of the History of Medicine and Allied Sciences , 1946-2010 (v38-v65; vII-vXXXVII)" ,
    "Journal of the London Mathematical Society, 1926-2010 (v49-v82; vs1-1-s2-48)" ,
-   "Journal of Theological Studies , 1899-2010 (v34-61; vos-I-os-XXXVIII; vI-vXXXIII)" ,
-   "Library, The, 1889-2010 (v1-v11; s1-s6; TBS-1-TBS-16)" ,
-   "Mind , 1876-2010 (v101-v119; os-1-os-XVI; II-XXXVIII)" ,
    "Music and Letters , 1920-2010 (v41-91; vI-vXXXVIII)" ,
    "Oxford Economic Papers , 1938-2010 (v1-v62; os-1-os-8)" ,
    "Parliamentary Affairs , 1947-2010 (v19-v63; vI-vXXXV)" ,
@@ -46,20 +46,36 @@ my @revuescoup = (
    "Proceedings of the London Mathematical Society, 1865-2010 (v74-v101; s1-s3)" ,
    "QJM An International Journal of Medicine, 1907-2010 (v1-v103; os-1-os24)" ,
    "Quarterly Journal of Mathematics , 1930-2010 (v1-v61; vos-1-vos-20)" ,
-   "Review of English Studies, 1925-2010 (v49-v61; os-I-os-XXIV; I-XXXVIII)" ,
    "Rheumatology , 1952-2010 (v1-v49; vIII-vXXXIV)" ,
    "Year's Work in English Studies, The , 1919-2010 (v48-v89; vII-vXXXVIII)"
 ) ;
+my @revuescoup_2p = (
+   "Journal of Theological Studies , 1899-2010 (v34-61; vos-I-os-XXXVIII; vI-vXXXIII)" ,
+   "Library, The, 1889-2010 (v1-v11; s1-s6; TBS-1-TBS-16)" ,
+   "Mind , 1876-2010 (v101-v119; os-1-os-XVI; II-XXXVIII)" ,
+   "Review of English Studies, 1925-2010 (v49-v61; os-I-os-XXIV; I-XXXVIII)"
+) ;
 
-my $regexp = join('|', map {quotemeta($_)} @revuescoup) ;
+my $regexp_1p = join('|', map {quotemeta($_)} @revuescoup_1p) ;
+my $regexp_2p = join('|', map {quotemeta($_)} @revuescoup_2p) ;
 
-warn "regexp: $regexp \n";
+warn "regexp pour revues à 1 point-virgule : $regexp_1p \n" if $debug ;
+warn "regexp pour revues à 2 points-virgules : $regexp_2p \n" if $debug ;
 
 # STDIN
 while (<>) {
-	# ici à corriger
-	if (m!^/data/oup/($regexp)!) {
-		# alors on enlève le 1er cara ';'
+	# ici un point virgule à masquer
+	if (m!^/data/oup/($regexp_1p)!) {
+		# alors ici on enlève le 1er cara ';'
+		$_ =~ s/;/__PVIRG__/ ;
+		
+		# corrigés > STDOUT
+		print $_ ;
+	}
+	# ici deux à masquer
+	elsif (m!^/data/oup/($regexp_2p)!) {
+		# 2 fois ici
+		$_ =~ s/;/__PVIRG__/ ;
 		$_ =~ s/;/__PVIRG__/ ;
 		
 		# corrigés > STDOUT
