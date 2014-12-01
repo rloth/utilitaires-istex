@@ -41,15 +41,22 @@ close(XFILE) ;
 my $declared_encoding = undef ;
 my $i = 0 ;
 
-my $declaration_lineidx = 0 ;
+my $declaration_lineidx = -1 ;
 
 while (not defined $declared_encoding) {
 	my $line = $lines[$i] ;
 	
 	# on cherche seulement un bout de l'entête
-	if ($line =~ m/<?xml[^>]+encoding="([-A-Za-z0-9]+)"/) {
+	if ($line =~ m/<\?xml[^>]+encoding="([-A-Za-z0-9]+)"/) {
 		$declared_encoding = $1 ;
 		$declaration_lineidx = $i ;
+		# on a fini
+		last ;
+	}
+	# déclaration sans encodage annoncé
+	elsif ($line =~ m/<\?xml[^>]+version[^>]+\?>/) {
+		$declaration_lineidx = $i ;
+		$declared_encoding = "" ;
 		# on a fini
 		last ;
 	}
@@ -60,7 +67,15 @@ while (not defined $declared_encoding) {
 	$i++ ;
 }
 
-warn "Trouvé $declared_encoding à la ligne $declaration_lineidx\n" ;
+if ($declared_encoding) {
+	warn "Trouvé $declared_encoding à la ligne $declaration_lineidx\n" ;
+}
+elsif ($declaration_lineidx != -1) {
+	warn "Trouvé déclaration sans encodage à la ligne $declaration_lineidx\n" ;
+}
+else {
+	warn "Pas de déclaration pour ce fichier\n" ;
+}
 
 
 # convert & replace declaration if needed, then print to STDOUT
@@ -71,9 +86,24 @@ if ($declared_encoding =~ m/UTF-8/i){
 	for my $l (@lines) { print $l } ;
 }
 elsif ($declared_encoding =~ m/^(?:^[A-Z]{2}-)?ASCII$/i) {
-	warn "ASCII for $file_path ;)" ;
 	# ASCII est un sous-ensemble d'UTF-8
 	$lines[$declaration_lineidx] =~ s/$declared_encoding/UTF-8/ ;
+	# OUTPUT
+	for my $l (@lines) { print $l } ;
+}
+elsif (length($declared_encoding) == 0) {
+	warn "DECLARATION VIDE for $file_path (line $declaration_lineidx)" ;
+	# y a-t-il quand même une déclaration ?
+	if ($declaration_lineidx == -1) {
+		# non => on ajoute une ligne avec toute la déclaration
+		unshift(@lines, '<?xml version="1.0" encoding="UTF-8"?>'."\n")
+	}
+	else {
+		# oui => on ajoute juste l'encodage au niveau du '?>' en fin de déclaration 
+		$lines[$declaration_lineidx] =~ s/\?>/ encoding="UTF-8"?>/ ;
+		warn "bidouillage déclaration existante ==> '".$lines[$declaration_lineidx] ."'\n"
+	}
+	
 	# OUTPUT
 	for my $l (@lines) { print $l } ;
 }
@@ -83,12 +113,17 @@ else {
 	# appel à iconv
 	@lines = qx/iconv -f $declared_encoding -t utf-8 $file_path/ ;
 	
-	# replacement of declaration & OUTPUT
-	for my $l (@lines) {
-		if ($l =~ m/<?xml[^>]+encoding="$declared_encoding"/) {
-			$l =~ s/encoding="$declared_encoding"/encoding="UTF-8"/ ;
+	if (scalar(@lines)) {
+		# replacement of declaration & OUTPUT
+		for my $l (@lines) {
+			if ($l =~ m/<\?xml[^>]+encoding="$declared_encoding"/) {
+				$l =~ s/encoding="$declared_encoding"/encoding="UTF-8"/ ;
+			}
+			print $l ;
 		}
-		print $l ;
+	}
+	else {
+		warn "ERREUR iconv pour '$file_path' avec enco déclaré \"$declared_encoding\"\n" ;
 	}
 }
 
