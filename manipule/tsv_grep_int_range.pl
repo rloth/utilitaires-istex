@@ -29,7 +29,7 @@ unless (defined ($the_field)) {
 
 while (<>) {
 	my @fields = split (/\t/, $_) ;
-	my $nbc = $fields[5] ;
+	my $nbc = $fields[$the_field-1] ;
 	if (($min <= $nbc) && ($nbc <= $max)) {
 		print $_ ;
 	}
