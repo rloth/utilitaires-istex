@@ -25,6 +25,7 @@ my $joinAcct     = $opts->{a} || 0 ;
 my $removeAcct   = $opts->{d} || 0 ;
 my $convertEntis = $opts->{e} || 0 ;
 my $convertEntisKeepXML = $opts->{x} || 0 ;
+#~ my $convertMoreEntisMathML = $opts->{m} || 0 ; #TODO
 my $replaceWeird  = $opts->{w} || 0 ;
 
 if ($convertEntisKeepXML && $convertEntis) {
@@ -40,19 +41,19 @@ while (<>) {
 	if ($convertEntisKeepXML) {
 		
 		# pour préserver '&' sous sa forme &amp;
-		s/&amp;/___amp___/g ;
-		s/&#0038;/___amp___/g ;
-		s/&#x0026;/___amp___/g ;
+		s/&amp;/___amp___/gi ;
+		s/&#0*38;/___amp___/gi ;
+		s/&#x0*26;/___amp___/gi ;
 		
 		# pour préserver '<' sous sa forme &lt;
-		s/&lt;/___lt___/g ;
-		s/&#0060;/___lt___/g ;
-		s/&#x003C;/___lt___/g ;
+		s/&lt;/___lt___/gi ;
+		s/&#0*60;/___lt___/gi ;
+		s/&#x0*3C;/___lt___/gi ;
 		
 		# pour préserver '>' sous sa forme &gt;
-		s/&gt;/___gt___/g ;
-		s/&#0062;/___gt___/g ;
-		s/&#x003E;/___gt___/g ;
+		s/&gt;/___gt___/gi ;
+		s/&#0*62;/___gt___/gi ;
+		s/&#x0*3E;/___gt___/gi ;
 		
 		# use HTML::HTML5::Entities;
 		decode_entities($_);
