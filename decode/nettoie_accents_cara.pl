@@ -41,26 +41,26 @@ while (<>) {
 	if ($convertEntisKeepXML) {
 		
 		# pour préserver '&' sous sa forme &amp;
-		s/&amp;/___amp___/gi ;
-		s/&#0*38;/___amp___/gi ;
-		s/&#x0*26;/___amp___/gi ;
+		s/&amp;/___amp___/goi ;
+		s/&#0*38;/___amp___/goi ;
+		s/&#x0*26;/___amp___/goi ;
 		
 		# pour préserver '<' sous sa forme &lt;
-		s/&lt;/___lt___/gi ;
-		s/&#0*60;/___lt___/gi ;
-		s/&#x0*3C;/___lt___/gi ;
+		s/&lt;/___lt___/goi ;
+		s/&#0*60;/___lt___/goi ;
+		s/&#x0*3C;/___lt___/goi ;
 		
 		# pour préserver '>' sous sa forme &gt;
-		s/&gt;/___gt___/gi ;
-		s/&#0*62;/___gt___/gi ;
-		s/&#x0*3E;/___gt___/gi ;
+		s/&gt;/___gt___/goi ;
+		s/&#0*62;/___gt___/goi ;
+		s/&#x0*3E;/___gt___/goi ;
 		
 		# use HTML::HTML5::Entities;
 		decode_entities($_);
 		
-		s/___amp___/&amp;/g ;
-		s/___lt___/&lt;/g ;
-		s/___gt___/&gt;/g ;
+		s/___amp___/&amp;/go ;
+		s/___lt___/&lt;/go ;
+		s/___gt___/&gt;/go ;
 	}
 	
 	if ($convertEntis) {
@@ -69,7 +69,10 @@ while (<>) {
 	}
 
 	if ($joinAcct) {
+		
+		my $before = $_ ;
 		s/([A-Za-z])([\x{0300}-\x{036F}`¨¯´¸˙˚\x{02db}˜˝^\x{ff3e}\x{ff40}\x{ffe3}])/combine_accent($1,$2)/eg ;
+		warn "joinAcct" if (m/[\x{0300}-\x{036F}`¨¯´¸˙˚\x{02db}˜˝^\x{ff3e}\x{ff40}\x{ffe3}]/) ;
 	}
 
  # suppression des accents
@@ -79,44 +82,44 @@ while (<>) {
 
 		# toutes les accentuées courantes sur leur équivalent ASCII
 		# NB : on utilise s/// car tr/// est plus difficile à utiliser avec l'utf8
-		s/[ÀÁÂÃÄÅĄĀĂ]/A/g ;
-		s/[àáâãäåąāă]/a/g ;
-		s/[ÇĆĈĊČ]/C/g ;
-		s/[çćĉċč]/c/g ;
-		s/[ĎĐ]/D/g ;
-		s/[ďđ]/d/g ;
-		s/[ÈÉÊËĘĒĔĖĚ]/E/g ;
-		s/[èéêëęēĕėě]/e/g ;
-		s/[ĜĞĠĢ]/G/g ;
-		s/[ĝğġģ]/g/g ;
-		s/[ĤĦ]/H/g ;
-		s/[ĥħ]/h/g ;
-		s/[ÌÍÎÏĨĪĬĮİ]/I/g ;
-		s/[ìíîïĩīĭįı]/i/g ;
-		s/[Ĵ]/J/g ;
-		s/[ĵ]/j/g ;
-		s/[Ķ]/K/g ;
-		s/[ķ]/k/g ;
-		s/[ŁĹĻĽĿ]/L/g ;
-		s/[łĺļľŀ]/l/g ;
-		s/[ÑŃŅŇ]/N/g ;
-		s/[ñńņň]/n/g ;
-		s/[ÒÓÔÕÖØŌŎŐ]/O/g ;
-		s/[òóôõöøōŏő]/o/g ;
-		s/[ŔŖŘ]/R/g ;
-		s/[ŕŗř]/r/g ;
-		s/[ŚŜŞŠ]/S/g ;
-		s/[śŝşš]/s/g ;
-		s/[ŢŤŦ]/T/g ;
-		s/[ţťŧ]/t/g ;
-		s/[ÙÚÛÜŨŪŬŮŰŲ]/U/g ;
-		s/[ùúûüũūŭůűų]/u/g ;
-		s/[Ŵ]/W/g ;
-		s/[ŵ]/w/g ;
-		s/[ŸÝŶ]/Y/g ;
-		s/[ÿýŷ]/y/g ;
-		s/[ŹŻŽ]/Z/g ;
-		s/[źżž]/z/g ;
+		s/[ÀÁÂÃÄÅĄĀĂ]/A/go ;
+		s/[àáâãäåąāă]/a/go ;
+		s/[ÇĆĈĊČ]/C/go ;
+		s/[çćĉċč]/c/go ;
+		s/[ĎĐ]/D/go ;
+		s/[ďđ]/d/go ;
+		s/[ÈÉÊËĘĒĔĖĚ]/E/go ;
+		s/[èéêëęēĕėě]/e/go ;
+		s/[ĜĞĠĢ]/G/go ;
+		s/[ĝğġģ]/g/go ;
+		s/[ĤĦ]/H/go ;
+		s/[ĥħ]/h/go ;
+		s/[ÌÍÎÏĨĪĬĮİ]/I/go ;
+		s/[ìíîïĩīĭįı]/i/go ;
+		s/[Ĵ]/J/go ;
+		s/[ĵ]/j/go ;
+		s/[Ķ]/K/go ;
+		s/[ķ]/k/go ;
+		s/[ŁĹĻĽĿ]/L/go ;
+		s/[łĺļľŀ]/l/go ;
+		s/[ÑŃŅŇ]/N/go ;
+		s/[ñńņň]/n/go ;
+		s/[ÒÓÔÕÖØŌŎŐ]/O/go ;
+		s/[òóôõöøōŏő]/o/go ;
+		s/[ŔŖŘ]/R/go ;
+		s/[ŕŗř]/r/go ;
+		s/[ŚŜŞŠ]/S/go ;
+		s/[śŝşš]/s/go ;
+		s/[ŢŤŦ]/T/go ;
+		s/[ţťŧ]/t/go ;
+		s/[ÙÚÛÜŨŪŬŮŰŲ]/U/go ;
+		s/[ùúûüũūŭůűų]/u/go ;
+		s/[Ŵ]/W/go ;
+		s/[ŵ]/w/go ;
+		s/[ŸÝŶ]/Y/go ;
+		s/[ÿýŷ]/y/go ;
+		s/[ŹŻŽ]/Z/go ;
+		s/[źżž]/z/go ;
 		
 		# alternative en 2 lignes qui marche pour tous sauf pour [ŁłĐđŦŧĦħ]
 		# (méthode en utilisant la décomposition des combos unicodes cara + accent)
@@ -160,80 +163,81 @@ while (<>) {
 		
 		# la plupart des tirets alternatifs --> tiret normal (dit "du 6")
 		# (dans l'ordre U+002D U+2010 U+2011 U+2012 U+2013 U+2014 U+2015 U+2212 U+FE63)
-		s/[‐‑‒–—―−﹣]/-/g ;
+		s/[‐‑‒–—―−﹣]/-/go ;
 		
 		# Guillemets
 		# ----------
 		# la plupart des quotes doubles --> "
 		tr/“”„‟/"/ ;   # U+201C U+201D U+201E U+201F
-		s/« ?/"/g ;    # U+20AB plus espace éventuel après
-		s/ ?»/"/g ;    # U+20AB plus espace éventuel avant
+		s/« ?/"/go ;    # U+20AB plus espace éventuel après
+		s/ ?»/"/go ;    # U+20AB plus espace éventuel avant
 		
 		# la plupart des quotes simples --> '
 		tr/‘’‚‛/'/ ;   # U+2018 U+2019 U+201a U+201b
-		s/‹ ?/"/g ;    # U+2039 plus espace éventuel après
-		s/ ?›/"/g ;    # U+203A plus espace éventuel avant
+		s/‹ ?/"/go ;    # U+2039 plus espace éventuel après
+		s/ ?›/"/go ;    # U+203A plus espace éventuel avant
 		# tr/\x{02BC}/'/ ; # parfois quote parfois modifieur accent aigü
 		# tr/\x{0092}/'/ ; # parfois quote parfois caractère de contrôle
 		
 		
 		# Ligatures
 		# ---------
-		s/Ꜳ/AA/g ;
-		s/ꜳ/aa/g ;
-		s/Æ/AE/g ;
-		s/æ/ae/g ;
-		s/Ǳ/DZ/g ;
-		s/ǲ/Dz/g ;
-		s/ǳ/dz/g ;
-		s/ﬃ/ffi/g ;
-		s/ﬀ/ff/g ;
-		s/ﬁ/fi/g ;
-		s/ﬄ/ffl/g ;
-		s/ﬂ/fl/g ;
-		s/ﬅ/ft/g ;
-		s/Ĳ/IJ/g ;
-		s/ĳ/ij/g ;
-		s/Ǉ/LJ/g ;
-		s/ǉ/lj/g ;
-		s/Ǌ/NJ/g ;
-		s/ǌ/nj/g ;
-		#~ s/Œ/OE/g ;
-		#~ s/œ/oe/g ;
-		s//oe/g ;   # U+009C (cara contrôle vu comme oe)
-		s/ﬆ/st/g ;
-		s/Ꜩ/Tz/g ;
-		s/ꜩ/tz/g ;
+		s/Ꜳ/AA/go ;
+		s/ꜳ/aa/go ;
+		s/Æ/AE/go ;
+		s/æ/ae/go ;
+		s/Ǳ/DZ/go ;
+		s/ǲ/Dz/go ;
+		s/ǳ/dz/go ;
+		s/ﬃ/ffi/go ;
+		s/ﬀ/ff/go ;
+		s/ﬁ/fi/go ;
+		s/ﬄ/ffl/go ;
+		s/ﬂ/fl/go ;
+		s/ﬅ/ft/go ;
+		s/Ĳ/IJ/go ;
+		s/ĳ/ij/go ;
+		s/Ǉ/LJ/go ;
+		s/ǉ/lj/go ;
+		s/Ǌ/NJ/go ;
+		s/ǌ/nj/go ;
+		#~ s/Œ/OE/go ;
+		#~ s/œ/oe/go ;
+		s//oe/go ;   # U+009C (cara contrôle vu comme oe)
+		s/ﬆ/st/go ;
+		s/Ꜩ/Tz/go ;
+		s/ꜩ/tz/go ;
 
+		# INACTIFS : stockés si besoin est
 		# diachro islande
-		# 	s/Ꜵ/AO/g ;
-		# 	s/ꜵ/ao/g ;
-		# 	s/Ꜷ/AU/g ;
-		# 	s/ꜷ/au/g ;
-		# 	s/Ꜹ/AV/g ;
-		# 	s/ꜹ/av/g ;
-		# 	s/Ꜽ/AY/g ;
-		# 	s/ꜽ/ay/g ;
-		# 	s/Ꝏ/OO/g ;
-		# 	s/ꝏ/oo/g ;
+	#	s/Ꜵ/AO/go ;
+	#	s/ꜵ/ao/go ;
+	#	s/Ꜷ/AU/go ;
+	#	s/ꜷ/au/go ;
+	#	s/Ꜹ/AV/go ;
+	#	s/ꜹ/av/go ;
+	#	s/Ꜽ/AY/go ;
+	#	s/ꜽ/ay/go ;
+	#	s/Ꝏ/OO/go ;
+	#	s/ꝏ/oo/go ;
 		
 		
 		# Divers
 		# -------
 		
-		s/…/.../g ;
-		s//.../g ;
-	# 	s/€/EUR/g ;
+	#	s/…/.../go ;
+	#	s//.../go ;
+	#	s/€/EUR/go ;
 
 		# bulletlikes cf aussi egrep -o "^ +[^ ] +"
-		s/▪/*/g ;
-		s/►/*/g ;
-		s/●/*/g ;
-		s/◘/*/g ;
-		s/→/*/g ;
-		s/•/*/g ;
-		s/·/*/g ;
-		s/☽/*/g ;
+	#	s/▪/*/go ;
+	#	s/►/*/go ;
+	#	s/●/*/go ;
+	#	s/◘/*/go ;
+	#	s/→/*/go ;
+	#	s/•/*/go ;
+	#	s/·/*/go ;
+	#	s/☽/*/go ;
 	}
 
  print ;
@@ -256,6 +260,7 @@ sub combine_accent {
 	# --------------------------------------------------------------------------------
 	if ($accent =~ /^[\x{0300}-\x{036F}]$/) {
 		# lettre + combining accent
+		warn "hello" ;
 		$combined_result = NFC($letter.$accent) ;
 	}
 	# lettre et caractère d'accentuation séparé dit 'spacing accent'
