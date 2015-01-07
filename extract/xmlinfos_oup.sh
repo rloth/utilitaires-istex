@@ -16,14 +16,14 @@ chemin=`echo $fichier | perl -pe 's/;/\;/g ; s/ /\ /g ; s/,/\,/g ; s/\(/\(/g ; s
 # echo "-->$chemin<--"
 
 # préparation
-front=`strings "$chemin" | grep -Pzo "(?s)<front[ >].*?</front>"`
+front=`grep -Pazo "(?s)<front[ >].*?</front>" "$chemin"`
 
 # ici récupération
-nbodychars=`strings "$chemin" | grep -Pzo "(?s)<body[ >].*?</body>" | wc -c`
-title=`echo $front | grep -Pzo "<(?:article-)?title[ >].*?</(?:article-)?title>" | tr "\r\n\t" " "`
-keywords=`echo $front | grep -Pzo "<kwd[ >].*?</kwd>" | tr "\r\n\t" " "`
+nbodychars=`grep -Pazo "(?s)<body[ >].*?</body>" "$chemin" | wc -c`
+title=`echo $front | grep -Pazo "<(?:article-)?title[ >].*?</(?:article-)?title>" | tr '\\\r\n\t' " "`
+keywords=`echo $front | grep -Pazo "<kwd[ >].*?</kwd>" | tr '\\\r\n\t' " "`
 langue='__NA__'
-abstract=`echo $front | grep -Pzo "(?s)<abstract[ >].*?</abstract>" | tr "\r\n\t" " "`
+abstract=`echo $front | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr '\\\r\n\t' " "`
 
 # OUTPUT
 echo -e "$fichier\t$nbodychars\t$langue\t$title\t$keywords\t$abstract"

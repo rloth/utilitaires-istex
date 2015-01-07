@@ -22,8 +22,8 @@ bibEntryElt="bib"
 # entrée
 fichier=$1
 # infos
-nbodychars=`strings $fichier | grep -Pzo "(?s)<${bodyElt}[ >].*</${bodyElt}>" | wc -c`
-match=`strings $fichier | grep -Pzo "(?s)<${bibListElt}[ >].*</${bibListElt}>"`
+nbodychars=`grep -Pazo "(?s)<${bodyElt}[ >].*</${bodyElt}>" $fichier | wc -c`
+match=`grep -Pazo "(?s)<${bibListElt}[ >].*</${bibListElt}>" $fichier`
 nbibs=`echo $match | grep -o "<${bibEntryElt}" | wc -l`
 nelts=`echo $match | grep -o "<" | wc -l`
 # sortie

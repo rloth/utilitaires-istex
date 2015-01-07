@@ -7,14 +7,14 @@
 chemin=$1
 
 # préparation
-front=`strings "$chemin" | grep -Pzo "(?s)<front[ >].*?</front>"`
+front=`grep -Pazo "(?s)<front[ >].*?</front>" $chemin`
 
 # récupérer infos
-nbodychars=`strings "$chemin" | grep -Pzo "(?s)<body[ >].*?</body>" | wc -c`
-title=`echo $front | grep -Pzo "(?s)<article-title[> ].*</article-title>" | tr "\r\n\t" " "`
-keywords=`echo $front | grep -Pzo "(?s)<kwd-group[ >].*?</kwd-group>" | grep -Pzo "(?s)<kwd[ >].*?</kwd>" | tr "\r\n\t" " "`
+nbodychars=`grep -Pazo "(?s)<body[ >].*?</body>" $chemin | wc -c`
+title=`echo $front | grep -Pazo "(?s)<article-title[> ].*</article-title>" | tr '\\\r\n\t' " "`
+keywords=`echo $front | grep -Pazo "(?s)<kwd-group[ >].*?</kwd-group>" | grep -Pazo "(?s)<kwd[ >].*?</kwd>" | tr '\\\r\n\t' " "`
 langue='__NA__'
-abstract=`echo $front | grep -Pzo "(?s)<abstract[ >].*?</abstract>" | tr "\r\n\t" " "`
+abstract=`echo $front | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr '\\\r\n\t' " "`
 
 # OUTPUT
 echo -e "$chemin\t$nbodychars\t$langue\t$title\t$keywords\t$abstract"

@@ -7,14 +7,14 @@
 chemin=$1
 
 # préparation
-header=`strings "$chemin" | grep -Pzo "(?s)<header[ >].*?</header>"`
+header=`grep -Pazo "(?s)<header[ >].*?</header>" $chemin`
 
 # RÉCUPS
-nbodychars=`strings "$chemin" | grep -Pzo "(?s)<body[ >].*?</body>" | wc -c`
-title=`echo $header | grep -Pzo "(?s)<title[> ].*?</title>" | tr "\r\n\t" " "`
-keywords=`strings "$chemin" | grep -Pzo "<keyword[ >].*?</keyword>" | tr "\r\n\t" " "`
+nbodychars=`grep -Pazo "(?s)<body[ >].*?</body>" $chemin | wc -c`
+title=`echo $header | grep -Pazo "(?s)<title[> ].*?</title>" | tr '\\\r\n\t' " "`
+keywords=`grep -Pazo "<keyword[ >].*?</keyword>" $chemin | tr '\\\r\n\t' " "`
 langue='__NA__'
-abstract=`echo $header | grep -Pzo "(?s)<abstract[ >].*?</abstract>" | tr "\r\n\t" " "`
+abstract=`echo $header | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr '\\\r\n\t' " "`
 
 # OUTPUT
 echo -e "$chemin\t$nbodychars\t$langue\t$title\t$keywords\t$abstract"
