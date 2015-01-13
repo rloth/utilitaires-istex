@@ -29,9 +29,6 @@ binmode(STDERR, ":utf8");
 binmode(STDOUT, ":utf8");
 use Getopt::Long ;
 
-# pour lecture dossier corpus
-use File::Find::Rule ;
-
 # pour lire le XML
 use XML::LibXML ;
 
@@ -67,6 +64,12 @@ my $ALPHA = 0 ;
 # (par exemple un xpath comme "//tag" ne matchera pas <tag xmlns="bidule"> où bidule est un ns déclaré sans prefixe)
 my $strictns = 0 ;
 
+# additional ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
+my $ns_add = "" ;
+
+# option bool pour complètement ignorer les entités (substituées avant parse)
+my $ignore_ents = 0 ;
+
 my $DO_RECODAGE_TAGS = "" ;
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # 
@@ -75,7 +78,9 @@ my $DO_RECODAGE_TAGS = "" ;
 			 "ext:s" => \$file_ext,     # opt str    (input file extensions)
 			 
 			 "xpath:s" => \$start_elt,  # opt str    (xpath to root of counting)
+			 "nsadd:s" => \$ns_add,     # opt str    ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
 			 
+			 "noent" => \$ignore_ents,  # opt bool   (ignore all XML entities)
 			 "liste" => \$liste,        # opt bool   (alternative output)
 			 "alpha" => \$ALPHA,        # opt bool   (alphabetic sort in tree output)
 			 
@@ -98,12 +103,8 @@ if ($FILE_IN) {
 else {
 	# on part du principe qu'on a un dossier mixte : 
 	# donc on filtre sur extension $FILE_EXT
-	my ($xml_files_array_ref, $size) = dir_walk_grep ({
-		'dir' => $xmldir ,
-		'ext' => "*.".$file_ext,
-		} );
-	@xml_paths = @{$xml_files_array_ref} ;
-}
+	@xml_paths = glob("$xmldir/*.$file_ext") ;
+} 
 
 my $N = scalar(@xml_paths) ;
 print "($N fichier".($N==1?"":"s")." .$file_ext)\n" ;
@@ -120,7 +121,8 @@ my $rec_freq_hash = {} ;
 my %lookup = () ;
 
 # parseur XML
-my $parser = XML::LibXML->new() ;
+my $parser = XML::LibXML->new(load_ext_dtd => 0) ;
+
 
 # flag décidé sur le premier document
 #   vaut soit 0 (inactif)
@@ -134,16 +136,34 @@ for my $path (@xml_paths) {
 	# pour log
 	my $doc_i_str = sprintf("%04d", $doc_i) ;
 	
+	my $content = "" ;
+	
+	open (DOC, "< $path") 
+	 || die "Problem opening document '$path'\n" ;
+	while (<DOC>) {
+		if ($ignore_ents) {
+			s/&[^;]+;/__ENT__/g ;
+		}
+		$content .= $_ ;
+	}
+	close DOC ;
+	#~ die $content ;
+	
 	######## APPEL DU PARSEUR ######################
 	my $doc ;
-	eval { $doc = $parser->parse_file($path) ; } ;
-
+	eval { $doc = $parser->parse_string($content) ; } ;
+	
+	# eval { $doc = $parser->parse_file($path) ; } ;
+	
+	#~ warn Dumper $doc ;
+	
 	# on saute le doc si déclenche une erreur de parsing xml
 	if ($@) {
 		warn "XMLERR: doc $doc_i_str ($path)\n" ;
 		warn (errlog($@,$path)) ;
 		next ;
 	}
+	
 	
 	# préparation XPATH
 	my $xpath_ng  = XML::LibXML::XPathContext->new($doc->documentElement());
@@ -173,6 +193,12 @@ for my $path (@xml_paths) {
 		#  parcequ'on enregistre le ns par défaut commme ns0)
 		# cf. https://metacpan.org/pod/XML::LibXML::Node#findnodes
 		# cf. aussi recherche sur "xpath default namespace"
+		
+		# idem pour tout namespace additionnel défini en paramètre de l'appel cl
+		if ($ns_add) {
+			my ($prefix, $uri) = split (/:/, $ns_add) ;
+			$xpath_ng->registerNs($prefix, $uri) ;
+		}
 	}
 	# ----------------------------------------------------------------------- -------
 	
@@ -263,58 +289,91 @@ sub rec_xml_freq_flat {
 # idx { "xml_elt_tag" -> {"_freq" => count , "xml_subelt_tag" => recursion } }
 sub rec_xml_freq_tree {
 	my $params = shift ;
-	my $xml_elt = $params->{'xml_elt'} ;     # XML::LibXML::Node
+	my $node = $params->{'xml_elt'} ;     # XML::LibXML::Node
 	my $cur_idx = $params->{'add_idx'} ;     # hashref récursif
 	my $ancestors = $params->{'ancestors'} ; # arrayref [root,...,gd-pere,pere]
 	
-	my $tag = $xml_elt->nodeName() ;
+	# cf. description des types (valeur numérique) en fin de fichier
+	my $test_type = $node->getType() ;
 	
-	if ($tag =~ "#comment") {
-		die "\ntag = $tag\n" ;
+	# si ce n'est pas un noeud "element" ni document
+	if ($test_type != 1 and $test_type != 9) {
+		# on ne fait rien
+		return($cur_idx) ;
 	}
-	
-	my $grouptag = $tag ;
-	
-	if ($DO_RECODAGE_TAGS) {
-		my $file_format = $DO_RECODAGE_TAGS ;
-		# recodages ad hoc dans le cas particulier d'un input NXML ou TEI
-		$grouptag = tag_recodage($tag, $xml_elt, $file_format) ;
-	}
-	
-	# terminaux PCDATA ignorés (n'apportent pas souvent une info supplémentaire)
-	if ($grouptag eq "#text" || $grouptag eq "SKIP") {
+	# document entier ou elt normal => parcour récursif + décompte ds idx
+	else {
+		my $xml_elt = $node ;
+		
+		my $tag = $xml_elt->nodeName() ;
+		
+		#~ if ($tag =~ "#comment") {
+			#~ die "\ntag = $tag\n" ;
+		#~ }
+		
+		my $grouptag = $tag ;
+		
+		if ($DO_RECODAGE_TAGS) {
+			my $file_format = $DO_RECODAGE_TAGS ;
+			# recodages ad hoc dans le cas particulier d'un input NXML ou TEI
+			$grouptag = tag_recodage($tag, $xml_elt, $file_format) ;
+		}
+		
+		# terminaux PCDATA ignorés (n'apportent pas souvent une info supplémentaire)
+		if ($grouptag eq "#text" || $grouptag eq "SKIP") {
+			return $cur_idx ;
+		}
+		
+		# ajout des attributs type et autres comme différenciateur
+		my @attrs = $xml_elt->attributes() ;
+		
+		# on gardera toujours la valeur des attributs @type
+		# et on signalera la présence d'autres attributs
+		for my $attr (@attrs) {
+			if (defined $attr) {
+				my $attr_name = $attr->nodeName ;
+				if ($attr_name eq "type") {
+					my $mon_type = $attr->value ;
+					
+					# ajout de l'attribut au tag recodé de groupement des décomptes
+					$grouptag = $grouptag.'[@'.$attr_name.'="'.$mon_type.'"]' ;
+				}
+				else {
+					$grouptag = $grouptag.'[@'.$attr_name.'="???"]' ;
+				}
+			}
+		}
+		
+		# pointeur (localiser le père dans l'arbre)
+		my $subtree = $cur_idx ;
+		for my $ancestor (@{$ancestors}) {
+			$subtree = $subtree->{$ancestor} ;
+		}
+		# warn $subtree ;
+		
+		# incrément local
+		if (defined($subtree->{$grouptag})) {
+			$subtree->{$grouptag}->{"_freq"} ++ ;
+		}
+		else {
+			$subtree->{$grouptag} = {} ;
+			$subtree->{$grouptag}->{"_freq"} = 1 ;
+		}
+		
+		# lancement récursif
+		if ($xml_elt->hasChildNodes()) {
+			push (@$ancestors, $grouptag) ;
+			for my $kid ($xml_elt->childNodes()) {
+	# 			warn "$grouptag 's kid no $k, ancestors = ".scalar(@$ancestors)."\n" ;
+				$cur_idx = rec_xml_freq_tree (
+					{"xml_elt"   => $kid,
+					 "add_idx"   => $cur_idx,
+					 "ancestors" => $ancestors}) ;
+			}
+			pop @$ancestors ;
+		}
 		return $cur_idx ;
 	}
-	
-	# pointeur (localiser le père dans l'arbre)
-	my $subtree = $cur_idx ;
-	for my $ancestor (@{$ancestors}) {
-		$subtree = $subtree->{$ancestor} ;
-	}
-	# warn $subtree ;
-	
-	# incrément local
-	if (defined($subtree->{$grouptag})) {
-		$subtree->{$grouptag}->{"_freq"} ++ ;
-	}
-	else {
-		$subtree->{$grouptag} = {} ;
-		$subtree->{$grouptag}->{"_freq"} = 1 ;
-	}
-	
-	# lancement récursif
-	if ($xml_elt->hasChildNodes()) {
-		push (@$ancestors, $grouptag) ;
-		for my $kid ($xml_elt->childNodes()) {
-# 			warn "$grouptag 's kid no $k, ancestors = ".scalar(@$ancestors)."\n" ;
-			$cur_idx = rec_xml_freq_tree (
-				{"xml_elt"   => $kid,
-				 "add_idx"   => $cur_idx,
-				 "ancestors" => $ancestors}) ;
-		}
-		pop @$ancestors ;
-	}
-	return $cur_idx ;
 }
 
 # Impression d'un index plat
@@ -406,12 +465,13 @@ sub errlog {
 	
 	return " "x$off."[$at]\n" ;
 	
-	#~ my @errors = split(/\n/,$at) ;
-	#~ my $best_line = "" ;
-	#~ my $best_score = 0 ;
-	#~ my $i = 0 ;
-	#~ for my $line (@errors) {
-		#~ # warn "orig >> $line\n" ;
+	my @errors = split(/\n/,$at) ;
+	my $best_line = "" ;
+	my $best_score = 0 ;
+	my $i = 0 ;
+	for my $line (@errors) {
+		warn "orig >> $line\n" ;
+	}
 		#~ $i++ ;
 		#~ my $test = $line ;
 		#~ $test =~ s/\s+/ /g ;
@@ -504,68 +564,6 @@ sub tag_recodage {
 	}
 }
 
-
-# os.walk avec filtre optionnel de profondeur et max
-# ---------------------------------------------------
-sub dir_walk_grep {
-	my $params = shift ;
-	# 4 params (seul la dir est obligatoire)
-	my $ref_dir    = $params->{'dir'} ;
-	my $max_break  = $params->{'max'} || undef ;
-	my $profondeur = $params->{'dep'} || 1 ;
-	my $filtre_exp = $params->{'ext'} || "*.xml" ;
-	
-	# "hash" ou "array" pour un path_hash_dir_file ou "array" pour un path_array
-	my $format    = $params->{'format'} || "array" ;
-	
-	warn "CORPUS: lecture dossier '$ref_dir'\n" ;
-	
-	if ($format eq "array") {
-		# use File::Find::Rule
-		my @out_array_paths = File::Find::Rule->file()
-						->name( $filtre_exp )      # eg: "*.pdf"
-						->maxdepth( $profondeur )
-						->in ( $ref_dir );
-		if ((defined $max_break) && (scalar(@out_array_paths) > $max_break)) {
-			@out_array_paths = @out_array_paths[0..$max_break-1] ;
-		}
-		return (\@out_array_paths, scalar(@out_array_paths))
-	}
-	else {
-		# use File::Find::Rule
-		my $ffr_obj = File::Find::Rule->file()
-						->name( $filtre_exp )      # eg: "*.pdf"
-						->maxdepth( $profondeur )
-						->start ( $ref_dir );
-		
-		# sortie format "hash" ie path_hash_dir_file
-		my $out_hash_paths = {} ;
-		my $elt_freq = 0 ;
-		
-		while (my $abs_path = $ffr_obj->match() ) {
-			# £ dommage de faire ça soit même alors que Find::File
-			# l'a probablement joint il y a un instant...
-			
-			#£ ne prend pas en compte l'échappement éventuel d'un /
-			$abs_path =~ '^(.*)/([^/]+)$' ;
-			my $dir = $1 ;
-			my $fname = $2 ;
-			
-			# stockage du chemin
-			unless (defined ($out_hash_paths->{$dir})) {
-				$out_hash_paths->{$dir} = [] ;
-			}
-			push (@{$out_hash_paths->{$dir}}, $fname) ;
-			
-			$elt_freq += 1 ;
-			
-			# £ stop avec shuffle implicite
-			last if (defined $max_break && $elt_freq >= $max_break) ;
-		}
-		return ($out_hash_paths, $elt_freq) ;
-	}
-}
-
 # renvoie le message d'aide
 # -------------------------
 sub HELP_MESSAGE {
@@ -614,6 +612,9 @@ sub HELP_MESSAGE {
 |   -s --strictns     xpath strict sur le defaut namespace |
 |                     (ne pas l'enregistrer comme ns0)     |
 |                                                          |
+|   -n --noents       ignorer toute entité XML             |
+|                     (substitées par __ENT__ avant parse) |
+|                                                          |
 |   -l --liste        sortie alternative : elt    freq     |
 |                     (liste simple au lieu d'un arbre)    |
 |----------------------------------------------------------|
@@ -622,3 +623,30 @@ sub HELP_MESSAGE {
 EOT
 	exit 0 ;
 }
+
+# Codes numériques des types de node renvoyés par $xelt->getType()
+# source :  libxml2 tree.h xmlElementType
+# -----------------------------------------------------------------
+#Enum xmlElementType {
+#    XML_ELEMENT_NODE = 1
+#    XML_ATTRIBUTE_NODE = 2
+#    XML_TEXT_NODE = 3
+#    XML_CDATA_SECTION_NODE = 4
+#    XML_ENTITY_REF_NODE = 5
+#    XML_ENTITY_NODE = 6
+#    XML_PI_NODE = 7
+#    XML_COMMENT_NODE = 8
+#    XML_DOCUMENT_NODE = 9
+#    XML_DOCUMENT_TYPE_NODE = 10
+#    XML_DOCUMENT_FRAG_NODE = 11
+#    XML_NOTATION_NODE = 12
+#    XML_HTML_DOCUMENT_NODE = 13
+#    XML_DTD_NODE = 14
+#    XML_ELEMENT_DECL = 15
+#    XML_ATTRIBUTE_DECL = 16
+#    XML_ENTITY_DECL = 17
+#    XML_NAMESPACE_DECL = 18
+#    XML_XINCLUDE_START = 19
+#    XML_XINCLUDE_END = 20
+#    XML_DOCB_DOCUMENT_NODE = 21
+#}
