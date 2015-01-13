@@ -4,6 +4,14 @@ ragreage.py: Reconstruction de refbibs réelles
              (métadonnées + chaîne d'origine)
              pour créer un corpus d'entraînement
              du modèle CRF "citations" dans Grobid
+             
+             Si on imagine 2 pôles :
+               A- XML data-driven (arbre de structuration de données)
+               B- XML text-driven (markup ou annotations d'un texte)
+             Alors cet utilitaire cherche à passer de A à B,
+             car B est essentiel pour du corpus qui doit servir 
+             d'entraînement
+             
 Principe:
 ---------
            ARTICLE
@@ -21,9 +29,10 @@ Principe:
              | |
            ragréage
              | |
-    balises xml simplifiées
-      sur chaîne d'origine
-       avec ponctuation
+   annotation xml simplifiées* bibl
+     sur chaîne verbatim du pdf
+     
+* simplifiées: moins d'arborescence, mais en préservant toute l'info markup
 """
 __copyright__   = "(c) 2014 - INIST-CNRS (projet ISTEX)"
 __author__      = "R. Loth"
@@ -53,15 +62,18 @@ def simple_path(xelt, relative_to = ""):
 	"""
 	# starting point
 	the_path = localname_of_tag(xelt.tag)
-	# ancestor loop
-	for pp in xelt.iterancestors():
-		pp_locname = localname_of_tag(pp.tag)
-		if pp_locname != relative_to:
-			# prepend elts on the way
-			the_path = pp_locname + "/" + the_path
-		else:
-			# reached chosen top elt
-			break
+	if the_path == relative_to:
+		return "."
+	else:
+		# ancestor loop
+		for pp in xelt.iterancestors():
+			pp_locname = localname_of_tag(pp.tag)
+			if pp_locname != relative_to:
+				# prepend elts on the way
+				the_path = pp_locname + "/" + the_path
+			else:
+				# reached chosen top elt
+				break
 	# voilà
 	return the_path
 
@@ -887,12 +899,14 @@ if __name__ == "__main__":
 	# remplissage des deux: XMLIDMAP et XMLTEXTS
 	for j, xbib in enumerate(xbibs):
 		xbib_id = xbib.xpath("@xml:id").pop()
-		nums = re.findall(r"[0-9]+", xbib_id)
+		
+		# numérotation en fin d'ID eg 1,2 ou 3 dans DDP278C1 DDP278C2 DDP278C3
+		nums = re.findall(r"[0-9]+^", xbib_id)
 		XMLIDMAP[j] = xbib_id
 		# print('nums', nums, 'pour j =',j, file=sys.stderr)
 		
 		# au passage diagnostic labels
-		if ((len(nums) != 1) or (int(nums[0]) != j+1)) and FLAG_STD_MAP: 
+		if (len(nums)) and (int(nums[0]) != j+1) and FLAG_STD_MAP: 
 			FLAG_STD_MAP = False
 		
 		bibtexts=[]
@@ -916,7 +930,8 @@ if __name__ == "__main__":
 	else:
 		# todo préciser le type de lacune observée (pas du tout de labels, ID avec plusieurs ints, ou gap dans la seq)
 		print("WARN: la numérotation XML:ID ne contient pas un label unique incrémental", file=sys.stderr)
-		# print(XMLIDMAP, file=sys.stderr)
+	
+	print(XMLIDMAP, file=sys.stderr)
 	
 	
 	#  INPUT PDF à comparer
@@ -1005,84 +1020,113 @@ if __name__ == "__main__":
 	print("---\nLINK PBIB TOKENS <=> XBIB FIELDS\n", file=sys.stderr)
 	# reconstitution séquence réelle des champs pdf, mais avec balises
 	
+	# £log de l'étape précédente
+	if args.debug >= 1:
+		print(xlinked_real_lines, file=sys.stderr)
 	
+	# pour la tokenisation des lignes via re.findall
 	re_tous = re.compile(r'\w+|[^\w\s]')
 	re_contenus = re.compile(r'\w+')
 	re_ponctuas = re.compile(r'[^\w\s]')
 	
-	# log
-	if args.debug >= 1:
-		print(xlinked_real_lines, file=sys.stderr)
 	
-	for j, pdflinegroup in enumerate(xlinked_real_lines):
+	# tempo £stockage infos par xbib
+	xbibinfos = [None for j in range(nxb)]
+	
+	for j, group_of_real_lines in enumerate(xlinked_real_lines):
 		
 		# à remplir 
 		pile = []
 		
-		# on prépare les infos XML
-		# ------------------------
-		corresp_xbib = xbibs[j]
-		# container_locname = "listBibl"
-		container_locname = localname_of_tag(corresp_xbib.getparent().tag)
-		# log
-		if args.debug >= 2:
-			print("-"*50, file=sys.stderr)
-			print(glance_xbib(corresp_xbib), file=sys.stderr)
-		
 		# préserve la ponctuation
-		veritable_tokens_from_pdf = re_tous.findall(pdflinegroup)
+		veritable_tokens_from_pdf = re_tous.findall(group_of_real_lines)
 		# tokenisation plus exhaustive qu'auparavant sur ce sous-ensemble "validé"
 		# remarque : on n'utilise pas de split pour préserver la ponctuation
 		
-		previous_xrelpath = None
+		# log
+		if args.debug >= 2:
+			print("-"*50, file=sys.stderr)
+			print("pdf lines:", veritable_tokens_from_pdf)
+			print("xml entry:", glance_xbib(xbibs[j]), file=sys.stderr)
 		
-		pdb.set_trace()
 		
+		# on prépare les infos XML qu'on s'attend à trouver
+		# ------------------------
+		this_xbib = xbibs[j]
+		
+		# on utilise iter() et pas itertext() pour avoir les chemins rel
+		subelts = [xelt_t for xelt_t in this_xbib.iter()]
+		
+		xbibinfos[j] = [None for t in range(len(subelts))]
+		
+		# £ préparer directement les prénoms ici?
+		for t, xelt in enumerate(subelts):
+			xrelpath = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
+			
+			xbibinfos[j][t] = xrelpath
+			
+			print(xrelpath, xbibinfos[j][t])
+			
+			if args.debug >= 2:
+				print("***", file=sys.stderr)
+				print("xrelpath:", xrelpath, file=sys.stderr)
+		
+		
+		#pdb.set_trace()
+		
+		# ------------------------------------>8--------------------
+		
+	print(xbibinfos)
+		
+		# ------------------------------------>8--------------------
+		
+		#~ # ON SE CALE SUR L'ORDRE DU TEXTE D'ORIGINE
+		#~ # ------------------------------------------
+		#~ # mais par contre on va suivre la progression avec un curseur
+		#~ # de la métadonnée de la petite boucle => registre par méta des curseurs
+		#~ for vtok in veritable_tokens_from_pdf:
+				#~ revtok = re.compile(r"\b%s\b" % re.escape(vtok))
+				#~ 
+				#~ # on utilise iter() et pas itertext() parce qu'on
+				#~ # devra expliciter tous les chemins avec getparent()
+				
+				# £ ou bien remplacer par xbibinfos[j]
+				
+				#~ for xelt in this_xbib.iter():
+					#~ xrelpath = simple_path(xelt, relative_to = container_locname)
+					#~ 
+					#~ if args.debug >= 2:
+						#~ print("***", file=sys.stderr)
+						#~ print("xrelpath:", xrelpath, file=sys.stderr)
+					#~ 
+					#~ # on reporte les correspondances
+					#~ 
+					#~ # cas particulier:  les noms+prénoms à garder ensemble
+					#~ # pour biblStruct/analytic/author|biblStruct/analytic/editor
+					#~ if (re.search(r"/persName/(?:(?:sur|fore)name|genName)$", xrelpath)):
+						#~ print("noms", xrelpath, " -- texte:", xelt.text, file=sys.stderr)
+						#~ # TODO couplage AB puis match directement toutes possibilités
+						#~ # eg r"A(\W)+B" et r"B(\W)+A"
+					#~ 
+					#~ # cas normal
+					#~ else:
+						#~ if (xelt.text is not None) and (revtok.search(xelt.text)):
+							#~ print("\t\tMATCH! '%s' <=> %s:'%s' " % (vtok, xrelpath, xelt.text))
+						#~ # on empile les ponctuations
+						#~ else:
+							#~ pass
+							#~ #pile_trouvés.append((vtok, "ponct"))
+						#~ 
+						#~ # on recense aussi les éléments tail qu'on ne sait pas traiter
+						#~ if (xelt.tail is not None and not re.match("^\s+$", xelt.tail)):
+							#~ print("VU un tail de '%s' pour %s" % (xelt.tail, xrelpath),
+								  #~ file=sys.stderr)
+
+
 		# registre des curseurs par xelt
 		# progressent au fur et à mesure des tokens
-		last_offsets = {}
-		
-		# ON SE CALE SUR L'ORDRE DU TEXTE D'ORIGINE
-		# ------------------------------------------
-		# mais par contre on va suivre la progression avec un curseur
-		# de la métadonnée de la petite boucle => registre par méta des curseurs
-		for vtok in veritable_tokens_from_pdf:
-				revtok = re.compile(r"\b%s\b" % re.escape(vtok))
-				
-				# on utilise iter() et pas itertext() parce qu'on
-				# devra expliciter tous les chemins avec getparent()
-				for xelt in corresp_xbib.iter():
-					xrelpath = simple_path(xelt, relative_to = container_locname)
-					
-					if args.debug >= 2:
-						print("***", file=sys.stderr)
-						print("xrelpath:", xrelpath, file=sys.stderr)
-					
-					# on reporte les correspondances
-					if (xelt.text is not None) and (revtok.search(xelt.text)):
-						print("\t\tMATCH! '%s' <=> %s:'%s' " % (vtok, xrelpath, xelt.text))
-					# on empile les ponctuations
-					else:
-						pass
-						#pile_trouvés.append((vtok, "ponct"))
-					
-					# on recense aussi les éléments tail qu'on ne sait pas traiter
-					if (xelt.tail is not None and not re.match("^\s+$", xelt.tail)):
-						print("VU un tail de '%s' pour %s" % (xelt.tail, xrelpath),
-						      file=sys.stderr)
-
-
-
-
-
-
-
-
-
-
-
-
-
+		# (ça permettra en gros de savoir où on en était après le xrelpath suivant)
+		# last_offsets = {}
 
 
 #~ {
