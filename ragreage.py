@@ -1043,11 +1043,11 @@ if __name__ == "__main__":
 			# au passage diagnostic consécutivité
 			# a-recup numérotation en fin d'ID 
 			# ex: 1,2 ou 3 dans DDP278C1 DDP278C2 DDP278C3
-			nums = re.findall(r"[0-9]+^", thisbib_id)
+			nums = re.findall(r"[0-9]+", thisbib_id)
 			
 			# b-verif
-			if (len(nums)) and (int(nums[-1]) != j+1) and FLAG_STD_MAP: 
-				FLAG_STD_MAP = False
+			if (len(nums)) and (int(nums[-1]) == j+1) and (j == 0 or FLAG_STD_MAP): 
+				FLAG_STD_MAP = True
 		
 		# log si haut debug
 		if args.debug >= 2:
@@ -1059,14 +1059,13 @@ if __name__ == "__main__":
 		# stockage
 		XMLIDMAP[j] = thisbib_id
 		
-	
-	if FLAG_STD_MAP:
-		print("GOOD: numérotation ID <> LABEL traditionnelle", file=sys.stderr)
-	else:
-		# todo préciser le type de lacune observée (pas du tout de labels, ID avec plusieurs ints, ou gap dans la seq)
-		print("WARN: la numérotation XML:ID ne contient pas un label unique incrémental", file=sys.stderr)
-	
-	print(XMLIDMAP, file=sys.stderr)
+	if args.debug >= 1:
+		print(XMLIDMAP, file=sys.stderr)
+		if FLAG_STD_MAP:
+			print("GOOD: numérotation ID <> LABEL traditionnelle", file=sys.stderr)
+		else:
+			# todo préciser le type de lacune observée (pas du tout de labels, ID avec plusieurs ints, ou gap dans la seq)
+			print("WARN: la numérotation XML:ID ne contient pas un label unique incrémental", file=sys.stderr)
 	
 	
 	if args.txtin:
@@ -1074,7 +1073,11 @@ if __name__ == "__main__":
 		# ======================
 		print("---\nLECTURE FLUX TXT ISSU DE PDF", file=sys.stderr)
 		
-		pdflines = [line.rstrip('\n') for line in open(args.txtin)]
+		try:
+			pdflines = [line.rstrip('\n') for line in open(args.txtin)]
+		except FileNotFoundError as e:
+			print("Echec ouverture du flux textin '%s': %s\n" % (e.filename,e.strerror), file=sys.stderr)
+			sys.exit(1)
 	else:
 		#  INPUT PDF à comparer
 		# ======================
@@ -1087,7 +1090,7 @@ if __name__ == "__main__":
 		except CalledProcessError as e:
 			print("Echec pdftotxt: cmdcall: '%s'\n  ==> FAILED (file not found?)" % e.cmd, file=sys.stderr)
 			# print(e.output, file=sys.stderr)
-			sys.exit()
+			sys.exit(1)
 		# got our pdf text!
 		pdflines = [line for line in pdftxt.split("\n")]
 	
@@ -1391,3 +1394,29 @@ if __name__ == "__main__":
 # <bibl> <author>Whittaker, J.</author>   (<date>1991</date>).   <title level="a">Graphical Models in Applied Multivariate Statistics</title>.   <publisher>Chichester: Wiley</publisher>. </bibl>
 
 # <bibl> <author>Surajit Chaudhuri and Moshe Vardi</author>.  <title level="a">On the equivalence of recursive and nonrecursive data-log programs</title>.   In <title level="m">The Proceedings of the PODS-92</title>,   pages <biblScope type="pp">55-66</biblScope>,   <date>1992</date>. </bibl>
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------------
+# C | MODELE CRF          | TRAINING EXE                        | TRAINING EXT
+# --+---------------------+-------------------------------------+------------------------------------------
+# 1 | fulltext            | createTrainingFulltext              | .training.fulltext.tei.xml
+# 2 | segmentation        | createTrainingSegmentation          | .training.segmentation.tei.xml
+# 3 | reference-segmenter | createTrainingReferenceSegmentation | .referenceSegmenter.training.tei.xml
+# 4 | citation            | createTrainingFulltext              | .training.references.tei.xml
+# 5 | name/citation       | createTrainingFulltext              | .training.citations.authors.tei.xml
+# ---------------------------------------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------------------------------------
+# C | MODELE CRF          | COMMANDE ragreage.py | FONCTION ragreage.py CORRESPONDANTE
+# --+---------------------+----------------------+---------------------------------------------------------
+# 1 | fulltext            |                      | 
+# 2 | segmentation        |                      | find_bib_zone
+# 3 | reference-segmenter |                      | link_txt_bibs_with_xml()
+# 4 | citation            | (par défaut)         | TODO ignorer <lb> + 2 post-traitements : auteurs et pp
+# 5 | name/citation       |                      | TODO ignorer tout sauf auteurs
+# ---------------------------------------------------------------------------------------------------------
