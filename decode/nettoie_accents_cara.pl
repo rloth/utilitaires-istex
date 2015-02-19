@@ -229,7 +229,7 @@ while (<>) {
 	#	s//.../go ;
 	#	s/€/EUR/go ;
 
-		# bulletlikes cf aussi egrep -o "^ +[^ ] +"
+		# puces (bullets) cf aussi egrep -o "^ +[^ ] +"
 	#	s/▪/*/go ;
 	#	s/►/*/go ;
 	#	s/●/*/go ;
@@ -333,7 +333,7 @@ sub spacing_to_combining_accent {
 	# il devrait être dans range [768-879] = hex range [300-36F]
 	my $decimal_cp = unpack('U*', $combining_accent) ;
 	if ($decimal_cp < 768 || $decimal_cp > 879) {
-		warn "found no equivalent in hex [0300-036F] for second char, codepoint '"
+		warn "found no equivalent in hex [0300-036F] for second char, codepoint decimal'"
 			.sprintf("%x",$decimal_cp)."'\n" ;
 		return "UNKNOWN_ACCENT" ;
 	}
