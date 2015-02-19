@@ -58,7 +58,19 @@ while(<>) {
 	my @fields = split(/\t/, $_) ;
 	my $n = scalar(@fields) ;
 	
-	die "il n'y a que $n colonnes dans cette table donc je ne peux pas prendre le champ ".($the_field+1)."\n" if ($the_field > $n-1) ;
+	my $nsep = () = $_ =~ m/\t/go;
+	my $ncol = $nsep + 1 ;
+	
+	# s'il n'y a pas assez de colonnes (même vides)
+	die "STDIN-l.$. : il n'y a que $ncol colonnes dans cette table donc je ne peux pas prendre le champ ".($the_field+1)."\n" if ($the_field > $ncol) ;
+	
+	# s'il y a des colonnes vides
+	my $nempty = $ncol - $n ;
+	if ($nempty) {
+		@fields = (@fields, ("") x $nempty) ;
+		#~ die Dumper \@fields ;
+	}
+	$n = $ncol ;
 	
 	# on part du principe que l'identifiant est le champ 1
 	my $id = $fields[0] ;
