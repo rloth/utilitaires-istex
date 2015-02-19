@@ -25,8 +25,10 @@
 use warnings ;
 use strict ;
 use utf8 ;
+use Encode ;
 binmode(STDERR, ":utf8");
 binmode(STDOUT, ":utf8");
+
 use Getopt::Long ;
 
 # pour lire le XML
@@ -72,6 +74,8 @@ my $ignore_ents = 0 ;
 
 my $DO_RECODAGE_TAGS = "" ;
 
+my $SHOW_MISC_ATTRS = 0 ;
+
 # # # # # # # # # # # # # # # # # # # # # # # # # # 
  GetOptions ("<>"    => \&set_file_in,  # non-option (input file path)
 			 "dir:s" => \$xmldir,       # opt str    (input dir)
@@ -80,7 +84,8 @@ my $DO_RECODAGE_TAGS = "" ;
 			 "xpath:s" => \$start_elt,  # opt str    (xpath to root of counting)
 			 "nsadd:s" => \$ns_add,     # opt str    ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
 			 
-			 "noent" => \$ignore_ents,  # opt bool   (ignore all XML entities)
+			 "killent" => \$ignore_ents,  # opt bool   (ignore all XML entities)
+			 "moreattrs" => \$SHOW_MISC_ATTRS,  # opt bool   (ignore all XML entities)
 			 "liste" => \$liste,        # opt bool   (alternative output)
 			 "alpha" => \$ALPHA,        # opt bool   (alphabetic sort in tree output)
 			 
@@ -103,7 +108,7 @@ if ($FILE_IN) {
 else {
 	# on part du principe qu'on a un dossier mixte : 
 	# donc on filtre sur extension $FILE_EXT
-	@xml_paths = glob("$xmldir/*.$file_ext") ;
+	@xml_paths = map {decode('UTF-8', $_)} glob("$xmldir/*.$file_ext") ;
 } 
 
 my $N = scalar(@xml_paths) ;
@@ -144,6 +149,10 @@ for my $path (@xml_paths) {
 		if ($ignore_ents) {
 			s/&[^;]+;/__ENT__/g ;
 		}
+		
+		# tempo pour les pseudotei d'entrainement non-conformes
+		next if (/fileDesc xml:id/) ;
+		
 		$content .= $_ ;
 	}
 	close DOC ;
@@ -171,15 +180,18 @@ for my $path (@xml_paths) {
 	# ----------------------------------------------------------------------- -------
 	# correction des namespaces (SI il y en a un par défaut à la racine du 1er doc ET si $strictns est faux)
 	unless ($strictns) {
+		
+		# on enregistre toujours la tei
+		$xpath_ng->registerNs("tei", "http://www.tei-c.org/ns/1.0") ;
+		
 		# sur le premier document : test du defaut namespace
 		if ($doc_i == 1) {
+			print "(xmlns='http://www.tei-c.org/ns/1.0' will map to xmlns:tei)\n" ;
 			my $root = $doc->documentElement();
 			# prise en compte des namespaces sans :pfx (et déclarés sur la racine)
-			for my $root_attr ($root->attributes()) {
-				if ($root_attr->nodeName() =~ /^xmlns$/) {
-					$has_default_namespace_uri = $root_attr->value ;
-					print "(xmlns='$has_default_namespace_uri' will map to xmlns:ns0)\n" ;
-				}
+			$has_default_namespace_uri = $root->namespaceURI ;
+			if ($has_default_namespace_uri) {
+				warn "(xmlns='$has_default_namespace_uri' will map to xmlns:ns0)\n" ;
 			}
 		}
 		# pour tous documents : rendre possible l'appel du namespace par défaut éventuel
@@ -332,13 +344,13 @@ sub rec_xml_freq_tree {
 		for my $attr (@attrs) {
 			if (defined $attr) {
 				my $attr_name = $attr->nodeName ;
-				if ($attr_name eq "type") {
+				if (($attr_name eq "type") || ($attr_name eq "unit")) {
 					my $mon_type = $attr->value ;
 					
 					# ajout de l'attribut au tag recodé de groupement des décomptes
 					$grouptag = $grouptag.'[@'.$attr_name.'="'.$mon_type.'"]' ;
 				}
-				else {
+				elsif ($SHOW_MISC_ATTRS) {
 					$grouptag = $grouptag.'[@'.$attr_name.'="???"]' ;
 				}
 			}
@@ -612,8 +624,13 @@ sub HELP_MESSAGE {
 |   -s --strictns     xpath strict sur le defaut namespace |
 |                     (ne pas l'enregistrer comme ns0)     |
 |                                                          |
-|   -n --noents       ignorer toute entité XML             |
+|   -n --nsadd        ajouter une declaration namespace    |
+|                     eg "tei:http://www.tei-c.org/ns/1.0" |
+|                                                          |
+|   -k --killents     ignorer toute entité XML             |
 |                     (substitées par __ENT__ avant parse) |
+|                                                          |
+|   -m --moreattrs    afficher ts les attributs (sans val) |
 |                                                          |
 |   -l --liste        sortie alternative : elt    freq     |
 |                     (liste simple au lieu d'un arbre)    |
@@ -624,6 +641,8 @@ EOT
 	exit 0 ;
 }
 
+
+# PI:
 # Codes numériques des types de node renvoyés par $xelt->getType()
 # source :  libxml2 tree.h xmlElementType
 # -----------------------------------------------------------------
