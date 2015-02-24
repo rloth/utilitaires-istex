@@ -49,6 +49,8 @@ __author__      = "R. Loth"
 __status__      = "Development"
 __version__     = "1.0"
 
+# TODO strip_tags pour tags trop fins groupés (authors et pp)
+
 # IMPORTS
 # =======
 # I/O
@@ -62,21 +64,16 @@ import re
 from math import ceil
 from itertools import permutations
 
-# debugger
-#~ import pdb
-
 # --------------------------------------------------------
 # Global vars
 biblStruct_to_bibl = {'monogr/title[@level="j"]': '<title level="j">',
-					  'monogr/title[@level="___"]': '<title level="j">',
-					  'monogr/title/title[@level="___"]': '<title level="j">',
 					  'monogr/title[@level="m"]': '<title level="m">',
 					  'analytic/title[@level="a"]': '<title level="a">',
-					  'analytic/title[@level="___"]': '<title level="a">',
-					  'analytic/title/title[@level="___"]': '<title level="a">',
+					  'series/title[@level="s"]': '<title level="s">',
 					  'analytic/title/hi': '<UN>',
 					  'analytic/title/title/hi': '<UN>',
 					  'monogr/meeting': '<title level="m">',
+					  'monogr/imprint/meeting': '<title level="m">',
 					  'monogr/imprint/date': '<date>',
 					  'monogr/imprint/date/@when': '<date>',
 					  'monogr/author/persName/surname': '<author>',
@@ -102,6 +99,7 @@ biblStruct_to_bibl = {'monogr/title[@level="j"]': '<title level="j">',
 					  'monogr/editor/persName/surname': '<editor>',
 					  'monogr/editor/persName/forename': '<editor>',
 					  'monogr/editor': '<editor>',
+					  'series/biblScope[@unit="vol"]': '<biblScope type="vol">',
 					  'note': '<note>',
 					  'monogr/idno': '<idno>',
 					  'analytic/idno': '<editor>',
@@ -129,33 +127,69 @@ class XTokinfo:
 	def make_pre_regexp(self):
 		"""Just the raw regexp string without capture"""
 		subtokens = re_tous.findall(self.xmlstr)
-		my_re_str = "\W*".join(map(re.escape,subtokens))
-		return r'%s' % my_re_str
+		esctokens = [t for t in map(re.escape,subtokens)]
+		my_re_str = "[\W£]*".join(r'%s' % u for u in esctokens)
+		# print ("re_str : /%s/" % my_re_str)
+		return my_re_str
 	
 	def make_regexp(self, prepared_re_str = None):
 		"""The precompiled regexp with capture around"""
-		if prepared_re_str is not None:
-			re_str = prepared_re_str
-		else:
+		# A1) récup d'une chaîne échappée
+		if prepared_re_str is None:
 			re_str = self.make_pre_regexp()
-		my_regexp = "\\b("+re_str+")"
-		return re.compile(r'%s' % my_regexp)
+		# A2) ou préalablement construite
+		else:
+			re_str = prepared_re_str
+		
+		# B) Décision du format des limites gauche et droite pour les \b
+		# test si commence par une ponctuation échappée
+		if re.match('\\\\*\W',re_str):
+			prefix = "("
+		else:
+			prefix = "\\b("
+		
+		# idem mais plus facile à la fin
+		if re.search('\W$', re_str):
+			postfix = ")"
+		else:
+			postfix = ")\\b"
+		
+		# C) construction de l'expression régulière
+		my_regexp = prefix + re_str + postfix
+		return re.compile(my_regexp)
+	
+	
+	
 	
 	def __str__(self):
-		#~ return "%s : '%s' : %s" % (self.relpath, self.xmlstr, self.tagout)
-		return "'%s' : %s" % (self.xmlstr, self.tagout)
+		return "%s : '%s' : %s" % (self.relpath, self.xmlstr, self.tagout)
+		# return "'%s' : %s" % (self.xmlstr, self.tagout)
 	
 	def __repr__(self):
 		return "<%s>" % self.__str__()
 # --------------------------------------------------------
 
 
-def strip_tags(match):
+def strip_inner_tags(match):
 	"""
-	Takes a re 'match object' and removes XML tags
+	Takes a re 'match object' and removes inner XML tags
 	"""
-	group = match.group(1)
-	return re.sub('\W', 'bbb', group)
+	capture = match.group(0)
+	top_mid_bot=re.match(r"^(<[^>]+>)(.*)(<[^>]+>)$",capture)
+	if (top_mid_bot is None):
+		print("CLEAN_TAG_ERR: capture doesn't start and end with xmltags", file=sys.stderr)
+		return(capture)
+	else:
+		tmb3 = top_mid_bot.groups()
+		ltag  = tmb3[0]
+		inner = tmb3[1]
+		rtag  = tmb3[2]
+		
+		# strip
+		inner = re.sub(r"<[^>]*>","",inner)
+		
+		# ok
+		return (ltag+inner+rtag)
 
 
 
@@ -191,7 +225,7 @@ def localname_of_tag(etxmltag):
 
 def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 	"""Trouver quelle biblStruct correspond le mieux à ch. ligne dans zone ?
-	
+	   (~ reference-segmenter)
 	TODO 
 	  - on n'utilise pas assez la double séquentialité
 	"""
@@ -247,7 +281,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 			# décompte de cooccurrences (pl.bow <=> xb.bow)
 			for ptok in pdf_w_tokens:
 				if debug >= 3:
-					print("match essai frag pdf du i=%i: '%s'" %(i , re.escape(tok)), file=sys.stderr)
+					print("match essai frag pdf du i=%i: '%s'" %(i , re.escape(ptok)), file=sys.stderr)
 				
 				reptok = re.compile(r"\b%s\b" % re.escape(ptok))
 				
@@ -309,7 +343,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 			if the_max_val == 0:
 				champions[i] = None
 				if debug >= 2:
-					print( "l.%i %-75s: NONE tout à 0" % (i, pdfbibzone[i]), file=sys.stderr)
+					print( "l.%i %-90s: NONE tout à 0" % (i, pdfbibzone[i]), file=sys.stderr)
 			
 			# cas rare: attribution raisonnable au précédent
 			# ... si mem_previous_argmax_j in candidats
@@ -334,7 +368,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 				if debug >= 1:
 					ma_bS = xbibs[argmax_j]
 					infostr = glance_xbib(ma_bS)
-					print( "l.%i %-75s: WINs suite XML %s %s (max=%s) (repêchage parmi %s ex aequo)" % (
+					print( "l.%i %-90s: WINs suite XML %s %s (max=%s) (repêchage parmi %s ex aequo)" % (
 						  i,
 						  pdfbibzone[i],
 						  argmax_j,
@@ -347,7 +381,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 			# - - - - - - - - - - - - - - - - - - - - - - -
 			else:
 				if debug >= 1:
-					print("l.%i %-75s: NONE exaequo bibs %s (maxs=%i)"  % (
+					print("l.%i %-90s: NONE exaequo bibs %s (maxs=%i)"  % (
 						  i,
 						  pdfbibzone[i],
 						  candidats, 
@@ -379,7 +413,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 				# match pas folichon
 				if the_max_val < 5 :
 					if debug >= 2:
-						print("l.%i %-75s: WEAK (max=%i) (x vide? ou cette ligne p vide ?)" % (i, pdfbibzone[i], the_max_val), file=sys.stderr)
+						print("l.%i %-90s: WEAK (max=%i) (x vide? ou cette ligne p vide ?)" % (i, pdfbibzone[i], the_max_val), file=sys.stderr)
 					# oublier résultat incertain
 					argmax_j = None
 				
@@ -392,7 +426,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 					if debug >= 1:
 						ma_bS = xbibs[argmax_j]
 						infostr = glance_xbib(ma_bS, longer=True)
-						print( "l.%i %-75s: WIN1 entrée XML %s %s (max=%i)" % (
+						print( "l.%i %-90s: WIN1 entrée XML %s %s (max=%i)" % (
 							  i,
 							  pdfbibzone[i],
 							  argmax_j,
@@ -417,7 +451,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 					if debug >= 2:
 						ma_bS = xbibs[argmax_j]
 						infostr = glance_xbib(ma_bS, longer=True)
-						print( "l.%i %-75s: WINs suite XML %s %s (max=%i vs d=%f) " % (
+						print( "l.%i %-90s: WINs suite XML %s %s (max=%i vs d=%f) " % (
 							  i,
 							  pdfbibzone[i],
 							  argmax_j,
@@ -429,7 +463,7 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 				else:
 					# TODO mettre une info "__WEAK__" dans champions[i] pour diagnostics
 					if debug >= 1:
-						print("l.%i %-75s: WEAK (max=%i vs d=%f)" % (
+						print("l.%i %-90s: WEAK (max=%i vs d=%f)" % (
 							  i,
 							  pdfbibzone[i],
 							  the_max_val,
@@ -457,10 +491,30 @@ def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 
 def check_align_seq(array_of_xidx):
 	"""Diagnostics sur les champions par ligne issus des matrices scores_pl_xb ?
-	# fonction TODO
+	   (signale les séquences en désordre pour diagnostics)
 	"""
-	pass
-	# fonction TODO: signalerait les séquences en désordre pour diagnostics
+	# seq <- champions sans duplicats
+	seq = []
+	checkset = set()
+	for w in array_of_xidx:
+		# on enlève les doublons
+		if w is None or w in checkset:
+			continue
+		else:
+			seq.append(w)
+			checkset.add(w)
+	
+	# diagnostic consécutivité
+	consec = True
+	lseq = len(seq)
+	for a in range(0,lseq):
+		if seq[a] != a:
+			# force est de le constater
+			consec = False
+			break
+	print("SEQ:intrus seq[%i]='%i'" % (a,seq[a]),file=sys.stderr)
+	
+	return consec
 
 	# exemple 1: rsc_1992_P2_P29920001815
 	# Les champions: [12, 12, 13, None, 14, 14, 14, 15, 15, 15, 15, 16, 16, 16, 17, 18, 18, 18, 18, 19, None, None, 18, 10, 28, 14, 21, 21, 21, 21, 22, 22, 23, 24, 24, None, 25, None, None, None, 26, None, 26, None, 27, 27, 28, 28, None, 28, 10, None, 29, None, None, 15, 30, 30, None, 31, None, 31, None, 5, 32, 32, None, 33, 0, 34]
@@ -962,6 +1016,10 @@ if __name__ == "__main__":
 		action='store')
 	
 	
+	# variable bool (?globale) si la segmentation des références parmi
+	# les lignes aura retrouvé une séquence croissante
+	CONSECUTIF = False
+	
 	args = parser.parse_args(sys.argv[1:])
 	
 	# défault pdfin
@@ -1139,8 +1197,13 @@ if __name__ == "__main__":
 	#             - or gaps in the list,
 	#             - or lines before 1st ref
 	#             - or lines after last ref
-
-	# ---------------------------------------------------------------------------------
+	
+	# vérification si on ne doit garder que les documents qui matchent bien
+	# (par exemple quand on génère un corpus d'entraînement)
+	if check_align_seq(winners):
+		CONSECUTIF = True
+	
+	#---------------------------------------------------------------------------------
 	# then we group content from pdf (each txtline i') by its associated xml id j_win
 	# ---------------------------------------------------------------------------------
 	# résultat à remplir
@@ -1159,8 +1222,10 @@ if __name__ == "__main__":
 			# morceaux de suite
 			else:
 				# on recolle les lignes successives d'une même bib
-				# (avec marqueur qui matche /\W+/ et sera transformé en '<lb/>')
-				xlinked_real_lines[j_win] += ' ___/___ '+pdflines[debut_zone+i_prime]
+				# SEPARATEUR SAUT DE LIGNE 
+				#  => format sortie reference-segmenter: sera transformé en '<lb/>'
+				#  => format sortie citations: ignoré car matche /\W+/
+				xlinked_real_lines[j_win] += "£"+pdflines[debut_zone+i_prime]
 
 	# log détaillé de cette étape
 	if args.debug >= 3:
@@ -1208,13 +1273,13 @@ if __name__ == "__main__":
 		this_xbib = xbibs[j]
 		
 		# log
-		if args.debug >= 1:
-			print("\n"+"="*50, file=sys.stderr)
-			# rappel entrée 1 PDF
-			print("pdf lines: \"%s\"" % group_of_real_lines, file=sys.stderr)
-			# rappel entrée 2 XML
-			print("xml entry:", glance_xbib(xbibs[j]) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
-			print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
+		# if args.debug >= 1:
+		print("\n"+"="*50, file=sys.stderr)
+		# rappel entrée 1 PDF
+		print("XML entry:", glance_xbib(xbibs[j]) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
+		print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
+		print("PDF lines: \"%s\"" % group_of_real_lines, file=sys.stderr)
+		# rappel entrée 2 XML
 		
 		# on utilise iter() et pas itertext() pour avoir les chemins rel
 		# + on le fait sous la forme iter(tag=elt) pour avoir les éléments
@@ -1235,12 +1300,11 @@ if __name__ == "__main__":
 		#  - cette info univoque sera à réintégrer en markup sur l'autre
 		#    flux (en gros une traduction tei:biblStruct => tei:bibl)
 		
-		# à remplir
-		toklist = []
 		
 		# £ stats absences ?
 		# empty_elts_that_should_be_there = 0
 		
+		toklist = []
 		for xelt in subelts:
 			
 			base_path = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
@@ -1309,7 +1373,7 @@ if __name__ == "__main__":
 					re_strs_to_combine.append(pretok.make_pre_regexp())
 				# print("+" * 50,"\n",len(re_strs_to_combine))
 				for combi in permutations(re_strs_to_combine):
-					combitok = XTokinfo(s="__group__", p=base_path)
+					combitok = XTokinfo(s="__GR(%s)__" % ",".join(combi), p=base_path)
 					combitok.re = combitok.make_regexp(
 					  prepared_re_str = "\W*".join(combi)
 					)
@@ -1334,61 +1398,75 @@ if __name__ == "__main__":
 		
 		# spécifique biblStruct:
 		# correspondances tag d'entrée => le tag de sortie
-		for tok in toklist:
+		for l, tok in enumerate(toklist):
+			
+			# 1) on génère le markup de sortie sur correspondances relpath
 			tok.tagout = biblStruct_relpath_to_train_markup(tok.relpath)
 			tok.endout = re.sub(r'^<','</', re.sub(r' .*$','>', tok.tagout))
 			
-			# sanity check 1 : the xmlstr we just found
+			# debug
+			if args.debug >= 1:
+				print("XTOK",l,tok, file=sys.stderr)
+			
+			# sanity check A : the xmlstr we just found
 			if tok.xmlstr is None:
 				print("ERR: no xmlstr for %s" % tok.relpath, file=sys.stderr)
 				my_doubt = True
 				continue
 			
-			# on crée des expressions régulières
+			# 2) on crée des expressions régulières
+			#    (sauf pour les noms/prénoms déjà préparés)
 			# "J Appl Phys" ==> r'J(\W+)Appl(\W+)Phys'
-			# (sauf pour les noms/prénoms déjà préparés)
 			# £ TODO : autoriser un tiret n'importe ou dans les mots des
 			#          longs champs !!
 			if tok.re is None:
 				tok.re = tok.make_regexp()
-			# print(tok.re)
 			
-			pseudo_out = tok.tagout + r"\1" + tok.endout
-			
-			# sanity check 2 : "there can be only one" !
+			# 3) on matche
+			#  £ TODO procéder par ordre inverse de longueur !!
 			n_matchs = len(re.findall(tok.re,group_of_real_lines))
+			
+			# sanity check B : "there can be only one" !
 			if n_matchs > 1:
 				print("ERR: '%s' (%s) matches too many times" % (tok.xmlstr, tok.relpath), file=sys.stderr)
 				my_doubt = True
 				continue
 			
-			if n_matchs < 1 and tok.xmlstr != "__group__":
-				print("ERR: '%s' (%s) didn't match with re '%s'" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
+			# quand tok.xmlstr == "__group__" au moins un des 2 ne matche pas
+			elif n_matchs < 1:
+				print("ERR: '%s' (%s) didn't match using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
 				my_doubt = True
 				continue
-				
-			# re.compile('\\b(Horm\\W*\\.\\W*Behav\\W*\\.)\\b')
 			
-			# ================================================================
-			# match direct naïf (TODO jonction nom-prénom + fusions groupes)
-			group_of_real_lines = re.sub(tok.re,pseudo_out,group_of_real_lines)
+			# 4) si on a un unique match => on le traite
+			else:
+				# match direct naïf (TODO jonction nom-prénom + fusions groupes)
+				pseudo_out = tok.tagout + r"\1" + tok.endout
+				group_of_real_lines = re.sub(tok.re,pseudo_out,group_of_real_lines)
+				print("OK: '%s' (%s) matched using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
+
+		print(toklist)
 		
-		# print(toklist)
-		
-		new_lines = re.sub("___/___","<lb/>",group_of_real_lines)
+		# SEPARATEUR SAUT DE LIGNE => format sortie reference-segmenter
+		new_lines = re.sub("£","<lb/>",group_of_real_lines)
 		
 		if my_doubt:
 			print("PASS: report incertain sur la refbib '%s'" % group_of_real_lines[0:10], file=sys.stderr)
-			continue
-		else:
-			print("new bibl lines:", file=sys.stderr)
 			
-			# dernier correctif
-			new_lines = re.sub(r'(<author>.*</author>)','<author>'+strip_tags+'</author>', new_lines)
-			new_lines = re.sub(r'(<biblScopp>.*</biblScopp>)','<biblScope unit="pp">'+strip_tags+'</biblScope>', new_lines)
-			
-			# OUTPUT FINAL
-			print("<bibl>"+new_lines+"</bibl>")
+			# continue ?
+			new_lines = "__DOUBT__:"+new_lines
+		
+		print("new bibl lines:", file=sys.stderr)
+		
+		# dernier correctif: groupement de tags pour le modèle citations
+		new_lines = re.sub(r'(<author>.*</author>)',strip_inner_tags, new_lines)
+		new_lines = re.sub(r'</biblScopp>', r'</biblScope>',
+				  re.sub(r'<biblScopp>', r'<biblScope type="pp">',
+				 re.sub(r'(<biblScopp>.*</biblScopp>)',strip_inner_tags,
+				new_lines)))
+		
+		# OUTPUT FINAL
+		print("<bibl>"+new_lines+"</bibl>")
 		
 # EXEMPLES DE SORTIE
 # <bibl> <author>Whittaker, J.</author>   (<date>1991</date>).   <title level="a">Graphical Models in Applied Multivariate Statistics</title>.   <publisher>Chichester: Wiley</publisher>. </bibl>
@@ -1397,8 +1475,9 @@ if __name__ == "__main__":
 
 
 
-
-
+# £TODO distinguer 2 sorties pour les modèles:
+#          - reference-segmenter
+#          - citations
 
 # ---------------------------------------------------------------------------------------------------------
 # C | MODELE CRF          | TRAINING EXE                        | TRAINING EXT
