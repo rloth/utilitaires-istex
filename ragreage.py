@@ -23,16 +23,16 @@ Principe:
         \\         /
          comparaisons
          ------------
-      (1) find_bibzone()
-      (2) link_txt_bibs_with_xml()
+      (1) find_bibzone()                => sortie segmentation 
+      (2) link_txt_bibs_with_xml()    ===> sortie reference-segmenter
       (3) align xml fields on pdftxt
-             | |
-           ragréage
-             | |
-   annotation xml simplifiées* bibl
-     sur chaîne verbatim du pdf
-     
-* simplifiées: moins d'arborescence, mais en préservant toute l'info markup
+             ||
+           report struct sur non-struct
+             ||
+            <bibl>
+   annotation xml simplifiées* bibl =====> TODO 
+    préservant toute l'info markup
+     sur chaîne réelle -txtin ou
 
 
 Entrée:
@@ -65,137 +65,129 @@ from math import ceil
 from itertools import permutations
 
 # --------------------------------------------------------
-# Global vars
-biblStruct_to_bibl = {'monogr/title[@level="j"]': '<title level="j">',
-					  'monogr/title[@level="m"]': '<title level="m">',
-					  'analytic/title[@level="a"]': '<title level="a">',
-					  'series/title[@level="s"]': '<title level="s">',
-					  'analytic/title/hi': '<UN>',
-					  'analytic/title/title/hi': '<UN>',
-					  'monogr/meeting': '<title level="m">',
-					  'monogr/imprint/meeting': '<title level="m">',
-					  'monogr/imprint/date': '<date>',
-					  'monogr/imprint/date/@when': '<date>',
-					  'monogr/author/persName/surname': '<author>',
-					  'monogr/author/persName/forename': '<author>',
-					  'analytic/author/persName/surname': '<author>',
+
+
+# global vars
+
+# MAP (biblStruct => bibl) to choose the final citation's 'out tag'
+STRUCT_TO_BIBL = {'analytic/title[@level="a"]' :            '<title level="a">',
+					  'analytic/title/hi' :                 '<UN>',
+					  'analytic/title/title/hi' :           '<UN>',
+					  'analytic/author/persName/surname' :  '<author>',
 					  'analytic/author/persName/forename': '<author>',
-					  'analytic/author/forename': '<author>',
-					  'analytic/author/surname': '<author>',
-					  'analytic/author': '<author>',
-					  'monogr/author': '<author>',
-					  'analytic/author/orgName': '<author>',
-					  'monogr/author/orgName': '<author>',
-					  'monogr/respStmt/name': '<author>',
-					  'analytic/respStmt/name': '<author>',
-					  #~ 'monogr/imprint/biblScope[@unit="pp"]': '<biblScope type="pp">',
-					  # pour fusion 2 tags avec balise fermante unique
-					  'monogr/imprint/biblScope[@unit="pp"]': '<biblScopp>',
-					  'monogr/imprint/biblScope[@unit="vol"]': '<biblScope type="vol">',
-					  'monogr/imprint/pubPlace': '<pubPlace>',
-					  'monogr/meeting/placeName': '<pubPlace>',
-					  'monogr/imprint/publisher': '<publisher>',
+					  'analytic/author/forename' :          '<author>',
+					  'analytic/author/surname' :           '<author>',
+					  'analytic/author/orgName' :           '<author>',  # ? orgName en <bibl> ?
+					  'analytic/author' :                   '<author>',
+					  'analytic/respStmt/name' :            '<author>',
+					  'monogr/author/persName/surname' :       '<author>',  # <!-- monogr -->
+					  'monogr/author/persName/forename' :        '<author>',
+					  'monogr/author/orgName' :                   '<author>',  # ? orgName en <bibl> ?
+					  'monogr/author' :                           '<author>',
+					  'monogr/respStmt/name' :                    '<author>',
+					  'monogr/imprint/meeting' :                  '<title level="m">',
+					  'monogr/meeting' :                          '<title level="m">',
+					  'monogr/imprint/date' :                     '<date>',
+					  'monogr/imprint/date/@when' :               '<date>',
+					  'monogr/title[@level="j"]' :                '<title level="j">',
+					  'monogr/title[@level="m"]' :                '<title level="m">',
+					  
+					  'monogr/imprint/biblScope[@unit="vol"]' :   '<biblScope type="vol">',
 					  'monogr/imprint/biblScope[@unit="issue"]': '<biblScope type="issue">',
-					  'monogr/editor/persName/surname': '<editor>',
-					  'monogr/editor/persName/forename': '<editor>',
-					  'monogr/editor': '<editor>',
-					  'series/biblScope[@unit="vol"]': '<biblScope type="vol">',
-					  'note': '<note>',
-					  'monogr/idno': '<idno>',
-					  'analytic/idno': '<editor>',
-					  'note/ref': '<ptr type="web">',
-					  'ref': '<ptr type="web">',
-					  'monogr/imprint/biblScope[@unit="part"]': '<biblScope type="chapter">',
-					  'monogr/imprint/biblScope[@unit="chap"]': '<biblScope type="chapter">'
+					  'monogr/imprint/biblScope[@unit="part"]' :  '<biblScope type="chapter">',
+					  'monogr/imprint/biblScope[@unit="chap"]' :  '<biblScope type="chapter">',
+					  'monogr/imprint/publisher' :                '<publisher>',
+					  'monogr/imprint/pubPlace' :                 '<pubPlace>',
+					  'monogr/meeting/placeName' :                '<pubPlace>',
+					  'monogr/editor/persName/surname' :       '<editor>',
+					  'monogr/editor/persName/forename' :      '<editor>',
+					  'monogr/editor' :                        '<editor>',
+					  'series/title[@level="s"]' :          '<title level="s">',
+					  'series/biblScope[@unit="vol"]' :     '<biblScope type="vol">',
+					  'note' :                              '<note>',
+					  'monogr/idno' :                       '<idno>',
+					  'analytic/idno' :                     '<editor>',
+					  'note/ref' :                          '<ptr type="web">',
+					  'ref' :                               '<ptr type="web">',
+					  
+					  # pour fusion 2 tags avec balise fermante unique
+					  'monogr/imprint/biblScope[@unit="pp"]': '<pp>',
+					  
+					  # sinon normal: 'monogr/imprint/biblScope[@unit="pp"]': '<biblScope type="pp">',
+					  
+					  
 					  # if bS has note which contains « thesis », publisher is a university
 						# 'monogr/imprint/publisher': 'orgName',
 					  }
-# --------------------------------------------------------
 
-class XTokinfo:
-	"""Groups infos about a str token found in the source XML"""
-	def __init__(self, s="", p="", t="", re=None):
-		# token
-		self.xmlstr = s
-		# xpath of src element in <biblStruct>
-		self.relpath = p
-		# flat xml elt in <bibl>
-		self.tagout = t
-		# regexp
-		self.re = re
-	
-	def make_pre_regexp(self):
-		"""Just the raw regexp string without capture"""
-		subtokens = re_tous.findall(self.xmlstr)
-		esctokens = [t for t in map(re.escape,subtokens)]
-		my_re_str = "[\W£]*".join(r'%s' % u for u in esctokens)
-		# print ("re_str : /%s/" % my_re_str)
-		return my_re_str
-	
-	def make_regexp(self, prepared_re_str = None):
-		"""The precompiled regexp with capture around"""
-		# A1) récup d'une chaîne échappée
-		if prepared_re_str is None:
-			re_str = self.make_pre_regexp()
-		# A2) ou préalablement construite
-		else:
-			re_str = prepared_re_str
-		
-		# B) Décision du format des limites gauche et droite pour les \b
-		# test si commence par une ponctuation échappée
-		if re.match('\\\\*\W',re_str):
-			prefix = "("
-		else:
-			prefix = "\\b("
-		
-		# idem mais plus facile à la fin
-		if re.search('\W$', re_str):
-			postfix = ")"
-		else:
-			postfix = ")\\b"
-		
-		# C) construction de l'expression régulière
-		my_regexp = prefix + re_str + postfix
-		return re.compile(my_regexp)
-	
-	
-	
-	
-	def __str__(self):
-		return "%s : '%s' : %s" % (self.relpath, self.xmlstr, self.tagout)
-		# return "'%s' : %s" % (self.xmlstr, self.tagout)
-	
-	def __repr__(self):
-		return "<%s>" % self.__str__()
+# each diagnostic whether the xml:ids end with 1,2,3... 
+# (TODO: autres diagnostics : absents, non numériques, consécutifs avec début != 1 etc)
+FLAG_STD_MAP = False
+
+# said endings 1,2,3 (if present) for label retrieval
+NUMS = None
+
 # --------------------------------------------------------
 
 
-def strip_inner_tags(match):
-	"""
-	Takes a re 'match object' and removes inner XML tags
-	"""
-	capture = match.group(0)
-	top_mid_bot=re.match(r"^(<[^>]+>)(.*)(<[^>]+>)$",capture)
-	if (top_mid_bot is None):
-		print("CLEAN_TAG_ERR: capture doesn't start and end with xmltags", file=sys.stderr)
-		return(capture)
-	else:
-		tmb3 = top_mid_bot.groups()
-		ltag  = tmb3[0]
-		inner = tmb3[1]
-		rtag  = tmb3[2]
+def prepare_arg_parser():
+	"""Preparation argument parser de l'input pour main"""
+	parser = argparse.ArgumentParser(
+		description="Ajout des ponctuations réelles dans un xml de refbibs (NB lent: ~ 2 doc/s sur 1 thread)",
+		usage="ragreage.py -x ech/tei.xml/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18xml_ddp278.xml -p ech/pdf/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18pdf_ddp278.pdf",
+		epilog="-----(© 2014 Inist-CNRS (ISTEX) romain.loth at inist dot fr )-----")
+	
+	
+	parser.add_argument('-x','--xmlin',
+		metavar='path/to/xmlfile',
+		help='path to a TEI.xml with citations in <biblStruct> xml format (perhaps to be created from native XML by a call like `saxonb-xslt -xsl:tools/Pub2TEI/Stylesheets/Publishers.xsl -s:exemples_RONI_1513/rsc_1992_C3_C39920001646.xml`)',
+		type=str,
+		required=True,
+		action='store')
 		
-		# strip
-		inner = re.sub(r"<[^>]*>","",inner)
+	
+	
+	parser.add_argument('-p','--pdfin',
+		metavar='path/to/pdffile',
+		help='path to a pdf file of the same text, for attempted pdftottext and citation regexp match',
+		type=str,
+		default=None ,  # cf juste en dessous
+		required=False,
+		action='store')
+	
+	parser.add_argument('-t','--txtin',
+		metavar='path/to/txtfile',
+		help='pdfin (as pdftotext string) can be replaced by a path to a txt flow, for attempted citation regexp match. This input text has be very close to the xml content (or segment thereof, in accordance with a chosen -m type) ',
+		type=str,
+		default=None ,  # cf juste en dessous
+		required=False,
+		action='store')
 		
-		# ok
-		return (ltag+inner+rtag)
-
-
+	
+	
+	parser.add_argument('-m','--model-type',
+		metavar='name-of-model',
+		help="format output as a valid tei's 'listBibl' (default) or tailored to a Grobid crf model pseudo-tei input (one of: 'segmentation', 'reference-segmenter', 'citations')",
+		type=str,
+		default='listBibl' ,
+		required=False,
+		action='store')
+	
+	
+	parser.add_argument('-d','--debug',
+		metavar=1,
+		type=int,
+		help='logging level for debug info in [0-3]',
+		default=0,
+		required=False,
+		action='store')
+	
+	
+	return parser
 
 def biblStruct_relpath_to_train_markup(relpath, context=None):
 	"""Translate a biblStruct path to a flat bibl one"""
-	return biblStruct_to_bibl[relpath]
+	return STRUCT_TO_BIBL[relpath]
 
 def simple_path(xelt, relative_to = ""):
 	"""Construct a path of local-names from tag to root
@@ -222,6 +214,286 @@ def localname_of_tag(etxmltag):
 	"""Strip etree tag from namespace and return local-name()
 	"""
 	return re.sub(r"{[^}]+}","",etxmltag)
+
+def strip_inner_tags(match):
+	"""
+	Takes a re 'match object' and removes inner XML tags
+	"""
+	capture = match.group(0)
+	top_mid_bot=re.match(r"^(<[^>]+>)(.*)(<[^>]+>)$",capture)
+	if (top_mid_bot is None):
+		print("CLEAN_TAG_ERR: capture doesn't start and end with xmltags", file=sys.stderr)
+		return(capture)
+	else:
+		tmb3 = top_mid_bot.groups()
+		ltag  = tmb3[0]
+		inner = tmb3[1]
+		rtag  = tmb3[2]
+		
+		# strip
+		inner = re.sub(r"<[^>]*>","",inner)
+		
+		# ok
+		return (ltag+inner+rtag)
+
+
+def xml_elts_to_match_tokens(xml_elements, this_xbib):
+	"""Convertit une branche XML sous la forme de tous ses sous-éléments
+	   en une liste de tokens matchables (avec 2 tags src,tgt + 1 regex)
+	   dont certains spécifiquement groupés pour le modèle crf citations
+	
+	Difficulté à voir il peut y avoir plus de tokens que d'éléments
+	   par ex: <biblScope unit="page" from="20" to="31" />
+	   => donne 2 tokens "20" et "31"
+	
+	Les tags et la regexp du token sont stockées dans son instance 
+	   tag in  => on prend un xpath simple en ajoutant les attributs clé
+	   tag out => tag in traduit via STRUCT_TO_BIBL pour tei:biblStruct => tei:bibl
+	   regexp => match défini dans classe XToken
+	"""
+	
+	toklist = []
+	for xelt in xml_elements:
+		base_path = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
+		
+		loc_name = localname_of_tag(xelt.tag)
+		
+		if args.debug >= 2:
+			print("***", file=sys.stderr)
+			print("base_path   :", base_path, file=sys.stderr)
+			print("text content:", xelt.text, file=sys.stderr)
+		
+		
+		# PLUSIEURS CAS PARTICULIERS spécifiques aux biblios
+		# -------------------------------------------------
+		# (autrement simplement : tok.xmlstr = xelt.text 
+		#                      et tok.relpath = base_path)
+		# -------------------------------------------------
+		
+		# cas particulier *date*
+		if loc_name == 'date':
+			# soit 1 token normal
+			if xelt.text:
+				tok = XTokinfo(s=xelt.text, p=base_path)
+				toklist.append(tok)
+			# soit token dans la valeur d'attribut
+			else:
+				tok = XTokinfo(s=xelt.get('when'), p="%s/@%s" % (base_path, 'when'))
+				toklist.append(tok)
+
+		# cas particuliers *pagination*: 
+		elif loc_name == 'biblScope' and xelt.get('unit') in ['page','pp']:
+			# soit un biblScope normal
+			if xelt.text:
+				tok = XTokinfo(s=xelt.text, p='%s[@unit="pp"]' % base_path)
+				toklist.append(tok)
+			# soit 2 tokens dans les attributs
+			else:
+				tok1 = XTokinfo(s=xelt.get('from'), p='%s[@unit="pp"]/@from' % base_path)
+				tok2 = XTokinfo(s=xelt.get('to'),   p='%s[@unit="pp"]/@to' % base_path)
+				toklist.append(tok1, tok2)
+
+		# tous les autres biblScope pour préserver leur @unit
+		elif loc_name == 'biblScope':
+			this_unit = xelt.get('unit')
+			tok = XTokinfo(s=xelt.text, p='%s[@unit="%s"]' % (base_path, this_unit))
+			toklist.append(tok)
+
+		# les title avec leur @level
+		# NB : xelt.text is not None devrait aller de soi et pourtant... pub2tei
+		elif loc_name == 'title' and xelt.text is not None:
+			this_level = xelt.get('level')
+			if this_level == None:
+				this_level="___"
+			tok = XTokinfo(s=xelt.text, p='%s[@level="%s"]' % (base_path, this_level))
+			toklist.append(tok)
+
+		# les noms/prénoms à prendre ensemble quand c'est possible...
+		# Pour cela on les traite non pas dans les enfants feuilles
+		# mais le plus haut possible en analytic|monogr/author
+		elif loc_name in ['author','editor']:
+			re_strs_to_combine = []
+			# print("+" * 50)
+			for subtext in xelt.itertext():
+				# print(subtext)
+				pretok = XTokinfo(s=subtext, p="tempo_names")
+				re_strs_to_combine.append(pretok.make_pre_regexp())
+			# print("+" * 50,"\n",len(re_strs_to_combine))
+			for combi in permutations(re_strs_to_combine):
+				combitok = XTokinfo(s="__GR(%s)__" % ",".join(combi), p=base_path)
+				combitok.re = combitok.make_regexp(
+				  prepared_re_str = "\W*".join(combi)
+				)
+				# print(combitok.re)
+				toklist.append(combitok)
+
+		# du coup on ne retraite pas tous les enfants du précédent
+		elif re.search(r'author|editor', base_path):
+			# print ("!!!skipping", base_path, xelt.text)
+			continue
+
+		# normalement on a déjà traité tous les cas 
+		# avec texte vide, attribut intéressant
+		# => ne reste que des texte vide inintéressants
+		elif xelt.text is None:
+			continue
+
+		# === cas normal ===
+		else:
+			tok = XTokinfo(s=xelt.text, p=base_path)
+			toklist.append(tok)
+	
+	
+	# XTokinfo[]
+	return toklist
+
+
+def match_citation_fields(xlinked_real_lines, xbibs):
+	"""Reconstructs <bibl> tags on a bibref string"""
+	
+	
+	nxb = len(xbibs)
+	
+	# tempo £stockage infos par xbib
+	xbibtoks = [None for j in range(nxb)]
+	
+	# chaque <bibl> de sortie dont on aura pu remplir les champs
+	biblList = []
+	
+	for j, group_of_real_lines in enumerate(xlinked_real_lines):
+			
+			this_xbib = xbibs[j]
+			
+			# pour vérifs : todo stat dessus passée en //
+			my_doubt = False
+			
+			if group_of_real_lines is None:
+				if args.debug > 0:
+					print("Didn't find the lines for XML bib %i" % j)
+				continue
+			
+			# - log -
+			if args.debug >= 1:
+				print("\n"+"="*50, file=sys.stderr)
+				
+				# rappel input XML
+				print("XML entry:", glance_xbib(this_xbib) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
+				print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
+				
+				# rappel input pdfin ou txtin
+				print("PDF lines: \"%s\"" % group_of_real_lines, file=sys.stderr)
+				print(re_tous.findall(group_of_real_lines), file=sys.stderr)
+				print("\n"+"-"*50, file=sys.stderr)
+			
+			
+			# on prépare les infos XML qu'on s'attend à trouver
+			# ------------------------
+			
+			# parcours de l'arbre
+			
+			# on utilise iter() et pas itertext() pour avoir les chemins rel
+			# + on le fait sous la forme iter(tag=elt) pour avoir les éléments
+			#   et pas les commentaires
+			subelts = [xelt_s for xelt_s in this_xbib.iter(tag=etree.Element)]
+			
+			# cette boucle part des éléments xml (contenus attendus) pour
+			# créer une liste de tokens avec à réintégrer à l'autre flux:
+			#   - les contenus => point d'ancrage qui dira *où* réintégrer
+			#   - leur balise  => décrit *ce que* l'on va réintégrer comme infos
+			
+			
+			toklist = xml_elts_to_match_tokens(subelts, this_xbib)
+			 #print(toklist)
+			
+			# on matche les infos XML sur le flux PDFTXT
+			# ------------------------------------------
+
+			# TODO remplacement des matchs sur chaine témoin
+			# (la vraie chaîne n'aura que des ajouts de balises)
+			# witness_string = group_of_real_lines
+			
+			# spécifique biblStruct:
+			# correspondances tag d'entrée => le tag de sortie
+			for l, tok in enumerate(toklist):
+				
+				# 1) on génère le markup de sortie sur correspondances relpath
+				tok.tagout = biblStruct_relpath_to_train_markup(tok.relpath)
+				tok.endout = re.sub(r'^<','</', re.sub(r' .*$','>', tok.tagout))
+				
+				# debug
+				if args.debug >= 1:
+					print("XTOK",l,tok, file=sys.stderr)
+				
+				# sanity check A : the xmlstr we just found
+				if tok.xmlstr is None:
+					print("ERR: no xmlstr for %s" % tok.relpath, file=sys.stderr)
+					my_doubt = True
+					continue
+				
+				# 2) on crée des expressions régulières
+				#    (sauf pour les noms/prénoms déjà préparés)
+				# "J Appl Phys" ==> r'J(\W+)Appl(\W+)Phys'
+				# £ TODO : autoriser un tiret n'importe ou dans les mots des
+				#          longs champs !!
+				if tok.re is None:
+					tok.re = tok.make_regexp()
+				
+				# 3) on matche
+				#  £ TODO procéder par ordre inverse de longueur !!
+				n_matchs = len(re.findall(tok.re,group_of_real_lines))
+				
+				# sanity check B : "there can be only one" !
+				if n_matchs > 1:
+					print("ERR: '%s' (%s) matches too many times" % (tok.xmlstr, tok.relpath), file=sys.stderr)
+					my_doubt = True
+					continue
+				
+				# quand tok.xmlstr == "__group__" au moins un des 2 ne matche pas
+				elif n_matchs < 1:
+					print("ERR: '%s' (%s) didn't match using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
+					my_doubt = True
+					continue
+				
+				# 4) si on a un unique match => on le traite
+				else:
+					# match direct naïf (TODO jonction nom-prénom + fusions groupes)
+					pseudo_out = tok.tagout + r"\1" + tok.endout
+					group_of_real_lines = re.sub(tok.re,pseudo_out,group_of_real_lines)
+					print("OK: '%s' (%s) matched using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
+
+			
+			# SEPARATEUR SAUT DE LIGNE => format sortie reference-segmenter
+			new_lines = re.sub("£","<lb/>",group_of_real_lines)
+			
+			
+			# dernier correctif: groupements de tags
+			# ------------------
+			
+			# -a- pages collées pour le modèle citation
+			new_lines = re.sub(r'<pp>', r'<biblScope type="pp">',
+					  re.sub(r'</pp>', r'</biblScope>',
+					 re.sub(r'(<pp>.*</pp>)',strip_inner_tags,
+					new_lines)))
+			
+			# -b- auteurs groupés
+			new_lines = re.sub(r'(<author>.*</author>)',strip_inner_tags, new_lines)
+			
+			new_lines = "<bibl>"+new_lines+"</bibl>"
+			
+			if my_doubt:
+				print("PASS: report incertain sur la refbib '%s'" % group_of_real_lines[0:10], file=sys.stderr)
+				
+				# continue ?
+				new_lines = "__DOUBT__:"+new_lines
+			
+			#~ my_bibl_matched = new_lines.decode('ascii')
+			biblList.append(new_lines)
+	
+	
+	
+	
+	return biblList
+
 
 def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
 	"""Trouver quelle biblStruct correspond le mieux à ch. ligne dans zone ?
@@ -585,7 +857,7 @@ def find_bib_zone (xmlbibnodes, rawtxtlines, debug=0):
 	# pour décompte un pré-préalable : 
 	# regex compile each token found in the xml
 	search_toks = set()
-	for st in XMLTEXTS:
+	for st in xmltexts:
 		for tok in re.split(r"\W+", st):
 			if is_searchable(tok):
 				etok = re.escape(tok)
@@ -963,6 +1235,71 @@ def is_searchable(a_string):
 	       )
 
 
+# --------------------------------------------------------
+# --------------------------------------------------------
+
+
+class XTokinfo:
+	"""Groups infos about a str token found in the source XML"""
+	def __init__(self, s="", p="", t="", re=None):
+		# token
+		self.xmlstr = s
+		# xpath of src element in <biblStruct>
+		self.relpath = p
+		# flat xml elt in <bibl>
+		self.tagout = t
+		# regexp
+		self.re = re
+	
+	def make_pre_regexp(self):
+		"""Just the raw regexp string without capture"""
+		subtokens = re_tous.findall(self.xmlstr)
+		esctokens = [t for t in map(re.escape,subtokens)]
+		my_re_str = "[\W£]*".join(r'%s' % u for u in esctokens)
+		# print ("re_str : /%s/" % my_re_str)
+		return my_re_str
+	
+	def make_regexp(self, prepared_re_str = None):
+		"""The precompiled regexp with capture around"""
+		# A1) récup d'une chaîne échappée
+		if prepared_re_str is None:
+			re_str = self.make_pre_regexp()
+		# A2) ou préalablement construite
+		else:
+			re_str = prepared_re_str
+		
+		# B) Décision du format des limites gauche et droite pour les \b
+		# test si commence par une ponctuation échappée
+		if re.match('\\\\*\W',re_str):
+			prefix = "("
+		else:
+			prefix = "\\b("
+		
+		# idem mais plus facile à la fin
+		if re.search('\W$', re_str):
+			postfix = ")"
+		else:
+			postfix = ")\\b"
+		
+		# C) construction de l'expression régulière
+		my_regexp = prefix + re_str + postfix
+		return re.compile(my_regexp)
+	
+	
+	
+	
+	def __str__(self):
+		return "%s : '%s' : %s" % (self.relpath, self.xmlstr, self.tagout)
+		# return "'%s' : %s" % (self.xmlstr, self.tagout)
+	
+	def __repr__(self):
+		return "<%s>" % self.__str__()
+# --------------------------------------------------------
+
+
+
+
+
 
 
 
@@ -979,46 +1316,8 @@ if __name__ == "__main__":
 	
 	# options et arguments
 	# ====================
-	parser = argparse.ArgumentParser(
-		description="Ajout des ponctuations réelles dans un xml de refbibs (NB lent: ~ 2 doc/s sur 1 thread)",
-		usage="ragreage.py -x ech/tei.xml/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18xml_ddp278.xml -p ech/pdf/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18pdf_ddp278.pdf",
-		epilog="-----(© 2014 Inist-CNRS (ISTEX) romain.loth at inist dot fr )-----")
+	parser = prepare_arg_parser()
 	
-	parser.add_argument('-x','--xmlin',
-		metavar='path/to/xmlfile',
-		help='path to a TEI.xml with citations in <biblStruct> xml format (perhaps to be created from native XML by a call like `saxonb-xslt -xsl:tools/Pub2TEI/Stylesheets/Publishers.xsl -s:exemples_RONI_1513/rsc_1992_C3_C39920001646.xml`)',
-		type=str,
-		required=True,
-		action='store')
-		
-	parser.add_argument('-p','--pdfin',
-		metavar='path/to/pdffile',
-		help='path to a pdf file of the same text, for attempted pdftottext and citation regexp match',
-		type=str,
-		default=None ,  # cf juste en dessous
-		required=False,
-		action='store')
-
-	parser.add_argument('-t','--txtin',
-		metavar='path/to/txtfile',
-		help='path to a txt flow of the same text (or segment thereof), for attempted citation regexp match',
-		type=str,
-		default=None ,  # cf juste en dessous
-		required=False,
-		action='store')
-
-	parser.add_argument('-d','--debug',
-		metavar=1,
-		type=int,
-		help='logging level for debug info in [0-3]',
-		default=0,
-		required=False,
-		action='store')
-	
-	
-	# variable bool (?globale) si la segmentation des références parmi
-	# les lignes aura retrouvé une séquence croissante
-	CONSECUTIF = False
 	
 	args = parser.parse_args(sys.argv[1:])
 	
@@ -1074,17 +1373,14 @@ if __name__ == "__main__":
 	# préalable: passage en revue des XML ~> diagnostics (vars globales)
 	# ----------
 	
-	# pour corresp. indice j <=> n° XML:ID (si trouvé, souvent == label)
-	XMLIDMAP = [None for j in range(nxb)]
+	# pour corresp. indice j <=> n° XML:ID (si trouvé)
+	xmlidmap = [None for j in range(nxb)]
 	
-	# si les xml:id finissent par 1,2,3... 
-	# (TODO: autres diagnostics : absents, non numériques, consécutifs avec début != 1 etc)
-	FLAG_STD_MAP = False
 	
 	# tous les contenus texte des elts xml, en vrac
-	XMLTEXTS = []
+	xmltexts = []
 	
-	# remplissage des deux: XMLTEXTS et XMLIDMAP
+	# remplissage des deux: xmltexts et xmlidmap
 	for j, xbib in enumerate(xbibs):
 		
 		thisbib_texts=[]
@@ -1092,20 +1388,31 @@ if __name__ == "__main__":
 			thisbib_texts.append(eltstr)
 		
 		# TODO : vérifier si intéressant de les préserver séparément (liste de listes)
-		XMLTEXTS += thisbib_texts
+		xmltexts += thisbib_texts
 		
 		thisbib_id = None
-		xbib_ids = xbib.xpath("@xml:id") ;
-		if len(xbib_ids):
+		xbib_id_nodes = xbib.xpath("@xml:id") ;
+		
+		# liste des xbib IDs
+		NUMS = None
+		
+		if len(xbib_id_nodes):
 			thisbib_id = xbib.xpath("@xml:id").pop()
 			# au passage diagnostic consécutivité
-			# a-recup numérotation en fin d'ID 
-			# ex: 1,2 ou 3 dans DDP278C1 DDP278C2 DDP278C3
-			nums = re.findall(r"[0-9]+", thisbib_id)
 			
-			# b-verif
-			if (len(nums)) and (int(nums[-1]) == j+1) and (j == 0 or FLAG_STD_MAP): 
+			# -a- recup numérotation en fin d'ID 
+			
+			# par ex: 1,2 ou 3 dans DDP278C1 DDP278C2 DDP278C3
+			NUMS = re.findall(r"[0-9]+", thisbib_id)
+			
+			# -b- verif
+			if (len(NUMS)) and (int(NUMS[-1]) == j+1) and (j == 0 or FLAG_STD_MAP): 
 				FLAG_STD_MAP = True
+			
+			# -c- on gardera NUMS pour les labels en sortie
+		
+		# stockage
+		xmlidmap[j] = thisbib_id
 		
 		# log si haut debug
 		if args.debug >= 2:
@@ -1113,18 +1420,19 @@ if __name__ == "__main__":
 		           "\nlecture des contenus texte xmlbib %i (@xml:id='%s')" 
 		              % (j, thisbib_id), file=sys.stderr)
 			print(thisbib_texts, file=sys.stderr)
-		
-		# stockage
-		XMLIDMAP[j] = thisbib_id
-		
+	
+	# // fin lecture xml bibs
+	
 	if args.debug >= 1:
-		print(XMLIDMAP, file=sys.stderr)
+		print(xmlidmap, file=sys.stderr)
 		if FLAG_STD_MAP:
 			print("GOOD: numérotation ID <> LABEL traditionnelle", file=sys.stderr)
 		else:
 			# todo préciser le type de lacune observée (pas du tout de labels, ID avec plusieurs ints, ou gap dans la seq)
 			print("WARN: la numérotation XML:ID ne contient pas un label unique incrémental", file=sys.stderr)
 	
+	
+
 	
 	if args.txtin:
 		#  INPUT TXT à comparer
@@ -1134,9 +1442,9 @@ if __name__ == "__main__":
 		try:
 			pdflines = [line.rstrip('\n') for line in open(args.txtin)]
 		except FileNotFoundError as e:
-			print("Echec ouverture du flux textin '%s': %s\n" % (e.filename,e.strerror), file=sys.stderr)
+			print("I/O ERR: Echec ouverture du flux textin '%s': %s\n" % (e.filename,e.strerror), file=sys.stderr)
 			sys.exit(1)
-	else:
+	elif args.pdfin:
 		#  INPUT PDF à comparer
 		# ======================
 		print("---\nLECTURE PDF", file=sys.stderr)
@@ -1146,13 +1454,18 @@ if __name__ == "__main__":
 			pdftxt = check_output(['pdftotext', args.pdfin, '-']).decode("utf-8")
 		
 		except CalledProcessError as e:
-			print("Echec pdftotxt: cmdcall: '%s'\n  ==> FAILED (file not found?)" % e.cmd, file=sys.stderr)
+			print("LIB ERR: Echec pdftotxt: cmdcall: '%s'\n  ==> failed (file not found?)" % e.cmd, file=sys.stderr)
 			# print(e.output, file=sys.stderr)
 			sys.exit(1)
 		# got our pdf text!
 		pdflines = [line for line in pdftxt.split("\n")]
+	else:
+		print("ARG ERR: On attend ici --pdfin foo.pdf (ou alors --txtin bar.txt)", file=sys.stderr)
+		sys.exit(1)
+	
 	
 	print ("N lignes: %i" % len(pdflines), file=sys.stderr)
+	
 	
 	
 	# TODO éventuellement quand pdf entier ?
@@ -1201,6 +1514,7 @@ if __name__ == "__main__":
 	# vérification si on ne doit garder que les documents qui matchent bien
 	# (par exemple quand on génère un corpus d'entraînement)
 	if check_align_seq(winners):
+		# TODO déclarer avant
 		CONSECUTIF = True
 	
 	#---------------------------------------------------------------------------------
@@ -1245,257 +1559,22 @@ if __name__ == "__main__":
 	print("---\nLINK PBIB TOKENS <=> XBIB FIELDS\n", file=sys.stderr)
 	# reconstitution séquence réelle des champs pdf, mais avec balises
 	
+	
 	# pour la tokenisation des lignes via re.findall
 	re_tous = re.compile(r'\w+|[^\w\s]')
 	re_contenus = re.compile(r'\w+')
 	re_ponctuas = re.compile(r'[^\w\s]')
 	
-	# tempo £stockage infos par xbib
-	xbibtoks = [None for j in range(nxb)]
+	# match détaillé
+	bibl_array = match_citation_fields(xlinked_real_lines, xbibs)
 	
-	for j, group_of_real_lines in enumerate(xlinked_real_lines):
-		# pour vérifs
-		my_doubt = False
-		
-		if group_of_real_lines is None:
-			if args.debug > 0:
-				print("Didn't find the lines for XML bib %i" % j)
-			continue
-		
-		# préserve la ponctuation
-		# £non utilisé mais utile à afficher en debug
-		veritable_tokens_from_pdf = re_tous.findall(group_of_real_lines)
-		# tokenisation plus exhaustive qu'auparavant sur ce sous-ensemble "validé"
-		# remarque : on n'utilise pas de split pour préserver la ponctuation
-		
-		# on prépare les infos XML qu'on s'attend à trouver
-		# ------------------------
-		this_xbib = xbibs[j]
-		
-		# log
-		# if args.debug >= 1:
-		print("\n"+"="*50, file=sys.stderr)
-		# rappel entrée 1 PDF
-		print("XML entry:", glance_xbib(xbibs[j]) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
-		print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
-		print("PDF lines: \"%s\"" % group_of_real_lines, file=sys.stderr)
-		# rappel entrée 2 XML
-		
-		# on utilise iter() et pas itertext() pour avoir les chemins rel
-		# + on le fait sous la forme iter(tag=elt) pour avoir les éléments
-		#   et pas les commentaires
-		subelts = [xelt_s for xelt_s in this_xbib.iter(tag=etree.Element)]
-		
-		# cette boucle part des éléments xml (contenus attendus) pour
-		# créer une liste de tokens avec à réintégrer à l'autre flux:
-		#   - les contenus => point d'ancrage qui dira *où* réintégrer
-		#   - leur balise  => décrit *ce que* l'on va réintégrer comme infos
-		
-		# difficultés à voir:
-		#  - il peut y avoir plus de tokens que d'éléments
-		#    par ex: <biblScope unit="page" from="20" to="31" />
-		#    => donne 2 tokens "20" et "31"
-		#  - il faut conserver une info univoque sur la nature de l'élt
-		#    => on prend un xpath simple en ajoutant les attributs clé
-		#  - cette info univoque sera à réintégrer en markup sur l'autre
-		#    flux (en gros une traduction tei:biblStruct => tei:bibl)
-		
-		
-		# £ stats absences ?
-		# empty_elts_that_should_be_there = 0
-		
-		toklist = []
-		for xelt in subelts:
-			
-			base_path = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
-			
-			loc_name = localname_of_tag(xelt.tag)
-			
-			if args.debug >= 2:
-				print("***", file=sys.stderr)
-				print("base_path   :", base_path, file=sys.stderr)
-				print("text content:", xelt.text, file=sys.stderr)
-			
-			
-			# PLUSIEURS CAS PARTICULIERS spécifiques aux biblios
-			# -------------------------------------------------
-			# (autrement simplement : tok.xmlstr = xelt.text 
-			#                      et tok.relpath = base_path)
-			# -------------------------------------------------
-			
-			# cas particulier *date*
-			if loc_name == 'date':
-				# soit 1 token normal
-				if xelt.text:
-					tok = XTokinfo(s=xelt.text, p=base_path)
-					toklist.append(tok)
-				# soit token dans la valeur d'attribut
-				else:
-					tok = XTokinfo(s=xelt.get('when'), p="%s/@%s" % (base_path, 'when'))
-					toklist.append(tok)
-
-			# cas particuliers *pagination*: 
-			elif loc_name == 'biblScope' and xelt.get('unit') in ['page','pp']:
-				# soit un biblScope normal
-				if xelt.text:
-					tok = XTokinfo(s=xelt.text, p='%s[@unit="pp"]' % base_path)
-					toklist.append(tok)
-				# soit 2 tokens dans les attributs
-				else:
-					tok1 = XTokinfo(s=xelt.get('from'), p='%s[@unit="pp"]/@from' % base_path)
-					tok2 = XTokinfo(s=xelt.get('to'),   p='%s[@unit="pp"]/@to' % base_path)
-					toklist.append(tok1, tok2)
-
-			# tous les autres biblScope pour préserver leur @unit
-			elif loc_name == 'biblScope':
-				this_unit = xelt.get('unit')
-				tok = XTokinfo(s=xelt.text, p='%s[@unit="%s"]' % (base_path, this_unit))
-				toklist.append(tok)
-
-			# les title avec leur @level
-			# NB : xelt.text is not None devrait aller de soi et pourtant... pub2tei
-			elif loc_name == 'title' and xelt.text is not None:
-				this_level = xelt.get('level')
-				if this_level == None:
-					this_level="___"
-				tok = XTokinfo(s=xelt.text, p='%s[@level="%s"]' % (base_path, this_level))
-				toklist.append(tok)
-
-			# les noms/prénoms à prendre ensemble quand c'est possible...
-			# Pour cela on les traite non pas dans les enfants feuilles
-			# mais le plus haut possible en analytic|monogr/author
-			elif loc_name in ['author','editor']:
-				re_strs_to_combine = []
-				# print("+" * 50)
-				for subtext in xelt.itertext():
-					# print(subtext)
-					pretok = XTokinfo(s=subtext, p="tempo_names")
-					re_strs_to_combine.append(pretok.make_pre_regexp())
-				# print("+" * 50,"\n",len(re_strs_to_combine))
-				for combi in permutations(re_strs_to_combine):
-					combitok = XTokinfo(s="__GR(%s)__" % ",".join(combi), p=base_path)
-					combitok.re = combitok.make_regexp(
-					  prepared_re_str = "\W*".join(combi)
-					)
-					# print(combitok.re)
-					toklist.append(combitok)
-
-			# du coup on ne retraite pas tous les enfants du précédent
-			elif re.search(r'author|editor', base_path):
-				# print ("!!!skipping", base_path, xelt.text)
-				continue
-
-			# normalement on a déjà traité tous les cas 
-			# avec texte vide, attribut intéressant
-			# => ne reste que des texte vide inintéressants
-			elif xelt.text is None:
-				continue
-
-			# === cas normal ===
-			else:
-				tok = XTokinfo(s=xelt.text, p=base_path)
-				toklist.append(tok)
-		
-		# spécifique biblStruct:
-		# correspondances tag d'entrée => le tag de sortie
-		for l, tok in enumerate(toklist):
-			
-			# 1) on génère le markup de sortie sur correspondances relpath
-			tok.tagout = biblStruct_relpath_to_train_markup(tok.relpath)
-			tok.endout = re.sub(r'^<','</', re.sub(r' .*$','>', tok.tagout))
-			
-			# debug
-			if args.debug >= 1:
-				print("XTOK",l,tok, file=sys.stderr)
-			
-			# sanity check A : the xmlstr we just found
-			if tok.xmlstr is None:
-				print("ERR: no xmlstr for %s" % tok.relpath, file=sys.stderr)
-				my_doubt = True
-				continue
-			
-			# 2) on crée des expressions régulières
-			#    (sauf pour les noms/prénoms déjà préparés)
-			# "J Appl Phys" ==> r'J(\W+)Appl(\W+)Phys'
-			# £ TODO : autoriser un tiret n'importe ou dans les mots des
-			#          longs champs !!
-			if tok.re is None:
-				tok.re = tok.make_regexp()
-			
-			# 3) on matche
-			#  £ TODO procéder par ordre inverse de longueur !!
-			n_matchs = len(re.findall(tok.re,group_of_real_lines))
-			
-			# sanity check B : "there can be only one" !
-			if n_matchs > 1:
-				print("ERR: '%s' (%s) matches too many times" % (tok.xmlstr, tok.relpath), file=sys.stderr)
-				my_doubt = True
-				continue
-			
-			# quand tok.xmlstr == "__group__" au moins un des 2 ne matche pas
-			elif n_matchs < 1:
-				print("ERR: '%s' (%s) didn't match using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
-				my_doubt = True
-				continue
-			
-			# 4) si on a un unique match => on le traite
-			else:
-				# match direct naïf (TODO jonction nom-prénom + fusions groupes)
-				pseudo_out = tok.tagout + r"\1" + tok.endout
-				group_of_real_lines = re.sub(tok.re,pseudo_out,group_of_real_lines)
-				print("OK: '%s' (%s) matched using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
-
-		print(toklist)
-		
-		# SEPARATEUR SAUT DE LIGNE => format sortie reference-segmenter
-		new_lines = re.sub("£","<lb/>",group_of_real_lines)
-		
-		if my_doubt:
-			print("PASS: report incertain sur la refbib '%s'" % group_of_real_lines[0:10], file=sys.stderr)
-			
-			# continue ?
-			new_lines = "__DOUBT__:"+new_lines
-		
-		print("new bibl lines:", file=sys.stderr)
-		
-		# dernier correctif: groupement de tags pour le modèle citations
-		new_lines = re.sub(r'(<author>.*</author>)',strip_inner_tags, new_lines)
-		new_lines = re.sub(r'</biblScopp>', r'</biblScope>',
-				  re.sub(r'<biblScopp>', r'<biblScope type="pp">',
-				 re.sub(r'(<biblScopp>.*</biblScopp>)',strip_inner_tags,
-				new_lines)))
+	for my_bibl in bibl_array:
 		
 		# OUTPUT FINAL
-		print("<bibl>"+new_lines+"</bibl>")
-		
+		print(my_bibl)
+	
+
 # EXEMPLES DE SORTIE
 # <bibl> <author>Whittaker, J.</author>   (<date>1991</date>).   <title level="a">Graphical Models in Applied Multivariate Statistics</title>.   <publisher>Chichester: Wiley</publisher>. </bibl>
 
 # <bibl> <author>Surajit Chaudhuri and Moshe Vardi</author>.  <title level="a">On the equivalence of recursive and nonrecursive data-log programs</title>.   In <title level="m">The Proceedings of the PODS-92</title>,   pages <biblScope type="pp">55-66</biblScope>,   <date>1992</date>. </bibl>
-
-
-
-# £TODO distinguer 2 sorties pour les modèles:
-#          - reference-segmenter
-#          - citations
-
-# ---------------------------------------------------------------------------------------------------------
-# C | MODELE CRF          | TRAINING EXE                        | TRAINING EXT
-# --+---------------------+-------------------------------------+------------------------------------------
-# 1 | fulltext            | createTrainingFulltext              | .training.fulltext.tei.xml
-# 2 | segmentation        | createTrainingSegmentation          | .training.segmentation.tei.xml
-# 3 | reference-segmenter | createTrainingReferenceSegmentation | .referenceSegmenter.training.tei.xml
-# 4 | citation            | createTrainingFulltext              | .training.references.tei.xml
-# 5 | name/citation       | createTrainingFulltext              | .training.citations.authors.tei.xml
-# ---------------------------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------------------------
-# C | MODELE CRF          | COMMANDE ragreage.py | FONCTION ragreage.py CORRESPONDANTE
-# --+---------------------+----------------------+---------------------------------------------------------
-# 1 | fulltext            |                      | 
-# 2 | segmentation        |                      | find_bib_zone
-# 3 | reference-segmenter |                      | link_txt_bibs_with_xml()
-# 4 | citation            | (par défaut)         | TODO ignorer <lb> + 2 post-traitements : auteurs et pp
-# 5 | name/citation       |                      | TODO ignorer tout sauf auteurs
-# ---------------------------------------------------------------------------------------------------------
