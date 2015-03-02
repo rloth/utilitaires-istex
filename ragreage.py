@@ -1,5 +1,9 @@
 #! /usr/bin/python3
 """
+
+TODOS préalables : feuille RSC (et Nat à part)
+
+
 ragreage.py: Reconstruction de refbibs réelles
              (métadonnées + chaîne d'origine)
              pour créer un corpus d'entraînement
@@ -59,83 +63,42 @@ import argparse
 from subprocess import (check_output, CalledProcessError)
 from lxml import etree
 
+# procédures
+import rag_procedures
+
 # fonctions
 import re
-from math import ceil
 from itertools import permutations
 
 # --------------------------------------------------------
-
-
+# --------------------------------------------------------
 # global vars
 
-# MAP (biblStruct => bibl) to choose the final citation's 'out tag'
-STRUCT_TO_BIBL = {'analytic/title[@level="a"]' :            '<title level="a">',
-					  'analytic/title/hi' :                 '<UN>',
-					  'analytic/title/title/hi' :           '<UN>',
-					  'analytic/author/persName/surname' :  '<author>',
-					  'analytic/author/persName/forename': '<author>',
-					  'analytic/author/forename' :          '<author>',
-					  'analytic/author/surname' :           '<author>',
-					  'analytic/author/orgName' :           '<author>',  # ? orgName en <bibl> ?
-					  'analytic/author' :                   '<author>',
-					  'analytic/respStmt/name' :            '<author>',
-					  'monogr/author/persName/surname' :       '<author>',  # <!-- monogr -->
-					  'monogr/author/persName/forename' :        '<author>',
-					  'monogr/author/orgName' :                   '<author>',  # ? orgName en <bibl> ?
-					  'monogr/author' :                           '<author>',
-					  'monogr/respStmt/name' :                    '<author>',
-					  'monogr/imprint/meeting' :                  '<title level="m">',
-					  'monogr/meeting' :                          '<title level="m">',
-					  'monogr/imprint/date' :                     '<date>',
-					  'monogr/imprint/date/@when' :               '<date>',
-					  'monogr/title[@level="j"]' :                '<title level="j">',
-					  'monogr/title[@level="m"]' :                '<title level="m">',
-					  
-					  'monogr/imprint/biblScope[@unit="vol"]' :   '<biblScope type="vol">',
-					  'monogr/imprint/biblScope[@unit="issue"]': '<biblScope type="issue">',
-					  'monogr/imprint/biblScope[@unit="part"]' :  '<biblScope type="chapter">',
-					  'monogr/imprint/biblScope[@unit="chap"]' :  '<biblScope type="chapter">',
-					  'monogr/imprint/publisher' :                '<publisher>',
-					  'monogr/imprint/pubPlace' :                 '<pubPlace>',
-					  'monogr/meeting/placeName' :                '<pubPlace>',
-					  'monogr/editor/persName/surname' :       '<editor>',
-					  'monogr/editor/persName/forename' :      '<editor>',
-					  'monogr/editor' :                        '<editor>',
-					  'series/title[@level="s"]' :          '<title level="s">',
-					  'series/biblScope[@unit="vol"]' :     '<biblScope type="vol">',
-					  'note' :                              '<note>',
-					  'monogr/idno' :                       '<idno>',
-					  'analytic/idno' :                     '<editor>',
-					  'note/ref' :                          '<ptr type="web">',
-					  'ref' :                               '<ptr type="web">',
-					  
-					  # pour fusion 2 tags avec balise fermante unique
-					  'monogr/imprint/biblScope[@unit="pp"]': '<pp>',
-					  
-					  # sinon normal: 'monogr/imprint/biblScope[@unit="pp"]': '<biblScope type="pp">',
-					  
-					  
-					  # if bS has note which contains « thesis », publisher is a university
-						# 'monogr/imprint/publisher': 'orgName',
-					  }
+# pour la tokenisation des lignes via re.findall
+re_TOUS = re.compile(r'\w+|[^\w\s]')
+re_CONTENUS = re.compile(r'\w+')
+re_PONCT = re.compile(r'[^\w\s]')
+
 
 # each diagnostic whether the xml:ids end with 1,2,3... 
 # (TODO: autres diagnostics : absents, non numériques, consécutifs avec début != 1 etc)
 FLAG_STD_MAP = False
 
 # said endings 1,2,3 (if present) for label retrieval
-NUMS = None
+# utilise l'attribut "n" quand il est présent
+# (dans la feuille elsevier il reprenait value-of sb:label)
+LABELS = None
 
 # --------------------------------------------------------
-
+# --------------------------------------------------------
+# fonctions
 
 def prepare_arg_parser():
 	"""Preparation argument parser de l'input pour main"""
 	parser = argparse.ArgumentParser(
 		description="Ajout des ponctuations réelles dans un xml de refbibs (NB lent: ~ 2 doc/s sur 1 thread)",
 		usage="ragreage.py -x ech/tei.xml/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18xml_ddp278.xml -p ech/pdf/oup_Human_Molecular_Genetics_1992-2010_v1-v19_hmg18_18_hmg18_18pdf_ddp278.pdf",
-		epilog="-----(© 2014 Inist-CNRS (ISTEX) romain.loth at inist dot fr )-----")
+		epilog="-----(© 2014-15 Inist-CNRS (ISTEX) romain.loth at inist dot fr )-----")
 	
 	
 	parser.add_argument('-x','--xmlin',
@@ -152,7 +115,6 @@ def prepare_arg_parser():
 		help='path to a pdf file of the same text, for attempted pdftottext and citation regexp match',
 		type=str,
 		default=None ,  # cf juste en dessous
-		required=False,
 		action='store')
 	
 	parser.add_argument('-t','--txtin',
@@ -160,7 +122,6 @@ def prepare_arg_parser():
 		help='pdfin (as pdftotext string) can be replaced by a path to a txt flow, for attempted citation regexp match. This input text has be very close to the xml content (or segment thereof, in accordance with a chosen -m type) ',
 		type=str,
 		default=None ,  # cf juste en dessous
-		required=False,
 		action='store')
 		
 	
@@ -170,7 +131,6 @@ def prepare_arg_parser():
 		help="format output as a valid tei's 'listBibl' (default) or tailored to a Grobid crf model pseudo-tei input (one of: 'segmentation', 'reference-segmenter', 'citations')",
 		type=str,
 		default='listBibl' ,
-		required=False,
 		action='store')
 	
 	
@@ -179,15 +139,20 @@ def prepare_arg_parser():
 		type=int,
 		help='logging level for debug info in [0-3]',
 		default=0,
-		required=False,
 		action='store')
 	
+		
+	parser.add_argument('-r', '--remainder',
+		dest='mask',
+		help='show mask after matches instead of normal output',
+		action='store_true')
 	
 	return parser
 
-def biblStruct_relpath_to_train_markup(relpath, context=None):
-	"""Translate a biblStruct path to a flat bibl one"""
-	return STRUCT_TO_BIBL[relpath]
+
+
+# --------------------------------------------------------
+# -B- fonctions xpath et nettoyage value-of
 
 def simple_path(xelt, relative_to = ""):
 	"""Construct a path of local-names from tag to root
@@ -211,13 +176,17 @@ def simple_path(xelt, relative_to = ""):
 	return the_path
 
 def localname_of_tag(etxmltag):
-	"""Strip etree tag from namespace and return local-name()
+	"""
+	Strip etree tag from namespace à la xsl:local-name()
 	"""
 	return re.sub(r"{[^}]+}","",etxmltag)
 
 def strip_inner_tags(match):
 	"""
-	Takes a re 'match object' and removes inner XML tags
+	Takes a re 'match object' and removes inner XML tags à la xsl:value-of()
+	
+	Ex: "<au>Merry</au> and <au>Pippin</au>"
+	    => <au>Merry and Pippin</au>
 	"""
 	capture = match.group(0)
 	top_mid_bot=re.match(r"^(<[^>]+>)(.*)(<[^>]+>)$",capture)
@@ -237,529 +206,6 @@ def strip_inner_tags(match):
 		return (ltag+inner+rtag)
 
 
-def xml_elts_to_match_tokens(xml_elements, this_xbib):
-	"""Convertit une branche XML sous la forme de tous ses sous-éléments
-	   en une liste de tokens matchables (avec 2 tags src,tgt + 1 regex)
-	   dont certains spécifiquement groupés pour le modèle crf citations
-	
-	Difficulté à voir il peut y avoir plus de tokens que d'éléments
-	   par ex: <biblScope unit="page" from="20" to="31" />
-	   => donne 2 tokens "20" et "31"
-	
-	Les tags et la regexp du token sont stockées dans son instance 
-	   tag in  => on prend un xpath simple en ajoutant les attributs clé
-	   tag out => tag in traduit via STRUCT_TO_BIBL pour tei:biblStruct => tei:bibl
-	   regexp => match défini dans classe XToken
-	"""
-	
-	toklist = []
-	for xelt in xml_elements:
-		base_path = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
-		
-		loc_name = localname_of_tag(xelt.tag)
-		
-		if args.debug >= 2:
-			print("***", file=sys.stderr)
-			print("base_path   :", base_path, file=sys.stderr)
-			print("text content:", xelt.text, file=sys.stderr)
-		
-		
-		# PLUSIEURS CAS PARTICULIERS spécifiques aux biblios
-		# -------------------------------------------------
-		# (autrement simplement : tok.xmlstr = xelt.text 
-		#                      et tok.relpath = base_path)
-		# -------------------------------------------------
-		
-		# cas particulier *date*
-		if loc_name == 'date':
-			# soit 1 token normal
-			if xelt.text:
-				tok = XTokinfo(s=xelt.text, p=base_path)
-				toklist.append(tok)
-			# soit token dans la valeur d'attribut
-			else:
-				tok = XTokinfo(s=xelt.get('when'), p="%s/@%s" % (base_path, 'when'))
-				toklist.append(tok)
-
-		# cas particuliers *pagination*: 
-		elif loc_name == 'biblScope' and xelt.get('unit') in ['page','pp']:
-			# soit un biblScope normal
-			if xelt.text:
-				tok = XTokinfo(s=xelt.text, p='%s[@unit="pp"]' % base_path)
-				toklist.append(tok)
-			# soit 2 tokens dans les attributs
-			else:
-				tok1 = XTokinfo(s=xelt.get('from'), p='%s[@unit="pp"]/@from' % base_path)
-				tok2 = XTokinfo(s=xelt.get('to'),   p='%s[@unit="pp"]/@to' % base_path)
-				toklist.append(tok1, tok2)
-
-		# tous les autres biblScope pour préserver leur @unit
-		elif loc_name == 'biblScope':
-			this_unit = xelt.get('unit')
-			tok = XTokinfo(s=xelt.text, p='%s[@unit="%s"]' % (base_path, this_unit))
-			toklist.append(tok)
-
-		# les title avec leur @level
-		# NB : xelt.text is not None devrait aller de soi et pourtant... pub2tei
-		elif loc_name == 'title' and xelt.text is not None:
-			this_level = xelt.get('level')
-			if this_level == None:
-				this_level="___"
-			tok = XTokinfo(s=xelt.text, p='%s[@level="%s"]' % (base_path, this_level))
-			toklist.append(tok)
-
-		# les noms/prénoms à prendre ensemble quand c'est possible...
-		# Pour cela on les traite non pas dans les enfants feuilles
-		# mais le plus haut possible en analytic|monogr/author
-		elif loc_name in ['author','editor']:
-			re_strs_to_combine = []
-			# print("+" * 50)
-			for subtext in xelt.itertext():
-				# print(subtext)
-				pretok = XTokinfo(s=subtext, p="tempo_names")
-				re_strs_to_combine.append(pretok.make_pre_regexp())
-			# print("+" * 50,"\n",len(re_strs_to_combine))
-			for combi in permutations(re_strs_to_combine):
-				combitok = XTokinfo(s="__GR(%s)__" % ",".join(combi), p=base_path)
-				combitok.re = combitok.make_regexp(
-				  prepared_re_str = "\W*".join(combi)
-				)
-				# print(combitok.re)
-				toklist.append(combitok)
-
-		# du coup on ne retraite pas tous les enfants du précédent
-		elif re.search(r'author|editor', base_path):
-			# print ("!!!skipping", base_path, xelt.text)
-			continue
-
-		# normalement on a déjà traité tous les cas 
-		# avec texte vide, attribut intéressant
-		# => ne reste que des texte vide inintéressants
-		elif xelt.text is None:
-			continue
-
-		# === cas normal ===
-		else:
-			tok = XTokinfo(s=xelt.text, p=base_path)
-			toklist.append(tok)
-	
-	
-	# XTokinfo[]
-	return toklist
-
-
-def match_citation_fields(xlinked_real_lines, xbibs):
-	"""Reconstructs <bibl> tags on a bibref string"""
-	
-	
-	nxb = len(xbibs)
-	
-	# tempo £stockage infos par xbib
-	xbibtoks = [None for j in range(nxb)]
-	
-	# chaque <bibl> de sortie dont on aura pu remplir les champs
-	biblList = []
-	
-	for j, group_of_real_lines in enumerate(xlinked_real_lines):
-			
-			this_xbib = xbibs[j]
-			
-			# pour vérifs : todo stat dessus passée en //
-			my_doubt = False
-			
-			if group_of_real_lines is None:
-				if args.debug > 0:
-					print("Didn't find the lines for XML bib %i" % j)
-				continue
-			
-			# - log -
-			if args.debug >= 1:
-				print("\n"+"="*50, file=sys.stderr)
-				
-				# rappel input XML
-				print("XML entry:", glance_xbib(this_xbib) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
-				print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
-				
-				# rappel input pdfin ou txtin
-				print("PDF lines: \"%s\"" % group_of_real_lines, file=sys.stderr)
-				print(re_tous.findall(group_of_real_lines), file=sys.stderr)
-				print("\n"+"-"*50, file=sys.stderr)
-			
-			
-			# on prépare les infos XML qu'on s'attend à trouver
-			# ------------------------
-			
-			# parcours de l'arbre
-			
-			# on utilise iter() et pas itertext() pour avoir les chemins rel
-			# + on le fait sous la forme iter(tag=elt) pour avoir les éléments
-			#   et pas les commentaires
-			subelts = [xelt_s for xelt_s in this_xbib.iter(tag=etree.Element)]
-			
-			# cette boucle part des éléments xml (contenus attendus) pour
-			# créer une liste de tokens avec à réintégrer à l'autre flux:
-			#   - les contenus => point d'ancrage qui dira *où* réintégrer
-			#   - leur balise  => décrit *ce que* l'on va réintégrer comme infos
-			
-			
-			toklist = xml_elts_to_match_tokens(subelts, this_xbib)
-			 #print(toklist)
-			
-			# on matche les infos XML sur le flux PDFTXT
-			# ------------------------------------------
-
-			# TODO remplacement des matchs sur chaine témoin
-			# (la vraie chaîne n'aura que des ajouts de balises)
-			# witness_string = group_of_real_lines
-			
-			# spécifique biblStruct:
-			# correspondances tag d'entrée => le tag de sortie
-			for l, tok in enumerate(toklist):
-				
-				# 1) on génère le markup de sortie sur correspondances relpath
-				tok.tagout = biblStruct_relpath_to_train_markup(tok.relpath)
-				tok.endout = re.sub(r'^<','</', re.sub(r' .*$','>', tok.tagout))
-				
-				# debug
-				if args.debug >= 1:
-					print("XTOK",l,tok, file=sys.stderr)
-				
-				# sanity check A : the xmlstr we just found
-				if tok.xmlstr is None:
-					print("ERR: no xmlstr for %s" % tok.relpath, file=sys.stderr)
-					my_doubt = True
-					continue
-				
-				# 2) on crée des expressions régulières
-				#    (sauf pour les noms/prénoms déjà préparés)
-				# "J Appl Phys" ==> r'J(\W+)Appl(\W+)Phys'
-				# £ TODO : autoriser un tiret n'importe ou dans les mots des
-				#          longs champs !!
-				if tok.re is None:
-					tok.re = tok.make_regexp()
-				
-				# 3) on matche
-				#  £ TODO procéder par ordre inverse de longueur !!
-				n_matchs = len(re.findall(tok.re,group_of_real_lines))
-				
-				# sanity check B : "there can be only one" !
-				if n_matchs > 1:
-					print("ERR: '%s' (%s) matches too many times" % (tok.xmlstr, tok.relpath), file=sys.stderr)
-					my_doubt = True
-					continue
-				
-				# quand tok.xmlstr == "__group__" au moins un des 2 ne matche pas
-				elif n_matchs < 1:
-					print("ERR: '%s' (%s) didn't match using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
-					my_doubt = True
-					continue
-				
-				# 4) si on a un unique match => on le traite
-				else:
-					# match direct naïf (TODO jonction nom-prénom + fusions groupes)
-					pseudo_out = tok.tagout + r"\1" + tok.endout
-					group_of_real_lines = re.sub(tok.re,pseudo_out,group_of_real_lines)
-					print("OK: '%s' (%s) matched using regexp /%s/" % (tok.xmlstr, tok.relpath, tok.re), file=sys.stderr)
-
-			
-			# SEPARATEUR SAUT DE LIGNE => format sortie reference-segmenter
-			new_lines = re.sub("£","<lb/>",group_of_real_lines)
-			
-			
-			# dernier correctif: groupements de tags
-			# ------------------
-			
-			# -a- pages collées pour le modèle citation
-			new_lines = re.sub(r'<pp>', r'<biblScope type="pp">',
-					  re.sub(r'</pp>', r'</biblScope>',
-					 re.sub(r'(<pp>.*</pp>)',strip_inner_tags,
-					new_lines)))
-			
-			# -b- auteurs groupés
-			new_lines = re.sub(r'(<author>.*</author>)',strip_inner_tags, new_lines)
-			
-			new_lines = "<bibl>"+new_lines+"</bibl>"
-			
-			if my_doubt:
-				print("PASS: report incertain sur la refbib '%s'" % group_of_real_lines[0:10], file=sys.stderr)
-				
-				# continue ?
-				new_lines = "__DOUBT__:"+new_lines
-			
-			#~ my_bibl_matched = new_lines.decode('ascii')
-			biblList.append(new_lines)
-	
-	
-	
-	
-	return biblList
-
-
-def link_txt_bibs_with_xml(pdfbibzone, xmlbibnodes, debug=0):
-	"""Trouver quelle biblStruct correspond le mieux à ch. ligne dans zone ?
-	   (~ reference-segmenter)
-	TODO 
-	  - on n'utilise pas assez la double séquentialité
-	"""
-	
-	m_xnodes = len(xmlbibnodes)
-	n_pzone = len(pdfbibzone)
-	
-	# initialisation matrice de décomptes cooc.
-	scores_pl_xb = [[0 for j in range(m_xnodes)] for i in range(n_pzone)]
-
-	# remarques sur matrice cooccurrences
-	# -----------------------------------
-	# en ligne: une ligne digitalisée du pdftotext
-	# en colonne: une des refbibs du xml
-	#  
-	# (~> "similarité" entre les lignes pdf et les entrées xml)
-	#
-	# la matrice devrait être +- diagonale 
-	# car il y a co-séquentialité des deux
-	# (transcriptions d'une même source)
-	#
-	# exemple matrice remplie sur 6 lignes pdf et 4 noeuds xml
-	# -----------------------
-	# [ 10,  1,  0,  2 ] : "1 M. Morra, E. Occhiello and F. Garbassi, J . Colloid Interface Sci.,"
-	# [  3,  0,  0,  0 ] : "1992, 149, 290."
-	# [  1,  6,  0,  2 ] : "2 E. N. Dalal, Langmuir, 1987, 3, 1009."
-	# [  1,  1,  0,  1 ] : "3 J. Domingue, Am. Lab., October, 1990, p. 5 ."
-	# [  2,  1,  0, 13 ] : "4 D. J. Gardner, N. C. Generalla. D. W. Gunnells and M. P."
-	# [  0,  1,  0,  5 ] : "Wolcolt, Langmuir, 1991, 7 , 2498."
-	
-	# la pdfligne 1 (ligne du haut) est très semblable à la 1ère xbib (score de 10)
-	# et on voit que la ligne suivante est une suite de cette même xbib (score de 3)
-	# (en colonne 3 on voit aussi une des xbibs toute vide)
-	# ( => conversion tei en amont probablement mal passée)
-	# -----------------------------------
-	
-	# compte des cooccurrences => remplissage matrice
-	# ========================
-	for i, probable_bib_line in enumerate(pdfbibzone):
-		# représentation de la ligne plus pratique
-		# (prépare les bouts de match effectuables avant de les compter ensemble)
-		
-		pdf_w_tokens =  [o for o in re.split(r'\W+', probable_bib_line) if (len(o) and o not in ["&", "and", "in", "In"])]
-		# remarque : split sur "\W+" et non pas "\s+"
-		# -------------------------------------------
-		# la ponctuation ajoutée ne nous intéresse pas encore 
-		# et pourrait gêner l'apparillage des lignes
-		
-		# print(pdf_w_tokens, file=sys.stderr)
-		
-		for j, xbib in enumerate(xmlbibnodes):
-			# count count
-			# décompte de cooccurrences (pl.bow <=> xb.bow)
-			for ptok in pdf_w_tokens:
-				if debug >= 3:
-					print("match essai frag pdf du i=%i: '%s'" %(i , re.escape(ptok)), file=sys.stderr)
-				
-				reptok = re.compile(r"\b%s\b" % re.escape(ptok))
-				
-				for xtext in xbib.itertext():
-					if debug >= 4:
-						print("\tsur frag xml du j=%i: %s" % (j, xtext), file=sys.stderr)
-					
-					# MATCH !
-					if reptok.search(xtext):
-						if debug >= 4:
-							print("\t\tMATCH (i=%i, j=%i)!" % (i,j), file=sys.stderr)
-						scores_pl_xb[i][j] += 1 
-						# + d'un match de même ptok sur le même xtxt n'est pas intéressant
-						break
-	
-	# pour log
-	# --------
-	if debug >= 2:
-		# reboucle: affichage détaillé pour log de la matrice des scores
-		for i in range(len(pdfbibzone)):
-			# ligne courante : [valeurs de similarité] verbatim de la ligne
-			print("pdf>biblio>l.%i: %s (max:%i) txt:'%s'" % (
-					  i,
-					  scores_pl_xb[i], 
-					  max(scores_pl_xb[i]), 
-					  # correspond à pdflines[debut_zone+i]
-					  pdfbibzone[i]
-					 ),
-				file=sys.stderr)
-	
-	
-	# RECHERCHE champions   
-	# ===================
-	# [argmax_j de scores[i][j] for j in xbibs], for i in pdflines
-	#
-	# => à remplir ici
-	champions = [None for x in range(n_pzone)]
-	
-	# mémoire du précédent pour favoriser ré-attributions *du même*
-	mem_previous_argmax_j = None
-	
-	# TODO mémoire plus longue pour favoriser attributions consécutives *du suivant* [i+1] aussi
-	
-	for i in range(n_pzone):
-		# a priori on ne sait pas
-		argmax_j = None
-		
-		# on espère un score gagnant franc, mais peut être 0
-		the_max_val = max(scores_pl_xb[i])
-		
-		# on n'utilise pas indexof(the_max_val) car si *ex aequo* on les veut tous
-		candidats = [j for j in range(nxb) if scores_pl_xb[i][j] == the_max_val]
-		
-		# si plusieurs ex aequo
-		# ----------------------
-		if len(candidats) > 1:
-			
-			# cas à noter: la ligne est pratiquement vide
-			if the_max_val == 0:
-				champions[i] = None
-				if debug >= 2:
-					print( "l.%i %-90s: NONE tout à 0" % (i, pdfbibzone[i]), file=sys.stderr)
-			
-			# cas rare: attribution raisonnable au précédent
-			# ... si mem_previous_argmax_j in candidats
-			#     malgré ambiguïté des similarités
-			elif (mem_previous_argmax_j in candidats
-			     and the_max_val > 5
-			     and len(candidats) <= nxb/10):
-				# Explication
-				# - - - - - -
-				# ex: txt:'T., Furukawa, T., Yamada, K., Akiyama, S. and' 
-				#     candidats exaequo bibs [7, 9, 28] à max 7
-				#     et mem_previous_argmax_j = 9
-				# cas ambigüs (eg auteurs aussi présents ailleurs,
-				#              ou que des mots présents ailleurs)
-				# mais consécutifs à une attribution claire
-				#      - - - - - - - - - - - - - - - - - - -
-				# => bravo REPECHAGE !
-				argmax_j = mem_previous_argmax_j
-				champions[i] = argmax_j
-				
-				# log
-				if debug >= 1:
-					ma_bS = xbibs[argmax_j]
-					infostr = glance_xbib(ma_bS)
-					print( "l.%i %-90s: WINs suite XML %s %s (max=%s) (repêchage parmi %s ex aequo)" % (
-						  i,
-						  pdfbibzone[i],
-						  argmax_j,
-						  infostr,
-						  the_max_val, 
-						  candidats
-						 ),
-						file=sys.stderr)
-			# cas générique ex aequo: *match pas concluant*
-			# - - - - - - - - - - - - - - - - - - - - - - -
-			else:
-				if debug >= 1:
-					print("l.%i %-90s: NONE exaequo bibs %s (maxs=%i)"  % (
-						  i,
-						  pdfbibzone[i],
-						  candidats, 
-						  the_max_val, 
-						 ),
-						file=sys.stderr)
-		
-		# --------------------------------
-		# là on a un match intéressant...
-		# --------------------------------
-		elif len(candidats) == 1:
-			
-			# on en a un !
-			argmax_j = candidats.pop()
-			
-			# à quelles valeurs max s'attendre ?
-			# -----------------------------------
-			# Pour une **ligne normale** on aura en général the_max_val > 10 avec observés [6-17]
-			# (citation entière ou début d'une citation sur ligne entière :
-			# la valeur max est alors assez haut : bon nombre d'infos casées
-			
-			# Par contre pour une **ligne de continuation** il est tout 
-			# à fait normal d'avoir une max_val basse, à 1 ou 2
-			# (donc plus difficile à repérer)
-			
-			# ligne normale
-			if argmax_j != mem_previous_argmax_j:
-				
-				# match pas folichon
-				if the_max_val < 5 :
-					if debug >= 2:
-						print("l.%i %-90s: WEAK (max=%i) (x vide? ou cette ligne p vide ?)" % (i, pdfbibzone[i], the_max_val), file=sys.stderr)
-					# oublier résultat incertain
-					argmax_j = None
-				
-				# xml correspondant trouvé !
-				else:
-					# bravo !
-					champions[i] = argmax_j
-					
-					# log
-					if debug >= 1:
-						ma_bS = xbibs[argmax_j]
-						infostr = glance_xbib(ma_bS, longer=True)
-						print( "l.%i %-90s: WIN1 entrée XML %s %s (max=%i)" % (
-							  i,
-							  pdfbibzone[i],
-							  argmax_j,
-							  infostr,
-							  the_max_val
-							 ),
-							file=sys.stderr)
-			
-			# ligne de continuation potentielle (même xbib préférée que le précédent)
-			else:
-				# moyenne des autres
-				the_drift = sum([x for j,x in enumerate(scores_pl_xb[i]) if j != argmax_j]) / nxb
-				
-				# tout le reste est bas, on est plus haut 
-				# et on trouve le même que mémorisé
-				# => on va dire que c'est concluant !
-				if (the_max_val > 2 * the_drift):
-					# bravo !
-					champions[i] = argmax_j
-					
-					# log
-					if debug >= 2:
-						ma_bS = xbibs[argmax_j]
-						infostr = glance_xbib(ma_bS, longer=True)
-						print( "l.%i %-90s: WINs suite XML %s %s (max=%i vs d=%f) " % (
-							  i,
-							  pdfbibzone[i],
-							  argmax_j,
-							  infostr,
-							  the_max_val, 
-							  the_drift
-							 ),
-							file=sys.stderr)
-				else:
-					# TODO mettre une info "__WEAK__" dans champions[i] pour diagnostics
-					if debug >= 1:
-						print("l.%i %-90s: WEAK (max=%i vs d=%f)" % (
-							  i,
-							  pdfbibzone[i],
-							  the_max_val,
-							  the_drift
-							 ),
-							file=sys.stderr)
-		# wtf?
-		else:
-			raise ValueError("len(candidats)")
-		
-		# mémorisation de durée 1
-		mem_previous_argmax_j = argmax_j
-	
-	# liste pour chaque ligne i la valeur de bib j trouvée, ou None
-	return champions
-	
-	# exemple interprétation liste
-	# ----------------------------
-	# [None, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, None, None, None, None, 4, 5, 5, 6, 6, 7, 7]
-	#                    ^^^^^^^^                ^^^^^^^^^^^^^^^^^^^^^^ 
-	#                ici lignes i=[6,7,8]       probablement saut de page
-	#                 matchent xbib j=2
-
-# --------------------------------------------------------
 
 def check_align_seq(array_of_xidx):
 	"""Diagnostics sur les champions par ligne issus des matrices scores_pl_xb ?
@@ -821,476 +267,439 @@ def check_align_seq(array_of_xidx):
 
 
 # --------------------------------------------------------
+# fonctions procédures citations (prepare field tokens => match in txt)
 
-def find_bib_zone (xmlbibnodes, rawtxtlines, debug=0):
-	"""Trouve la zone de bibs dans du texte brut
-	       - en utilisant les infos de la bibl structurée XML 
-	         supposée dispo (ça aide beaucoup)
-	       - en regardant l'aspect intrinsèque de la ligne (aide la précision du précédent)
-	       - ou tout simplement si on trouve l'intitulé "References"
+def biblStruct_elts_to_match_tokens(xml_elements, this_xbib, debug=0):
+	""" Prepares tokens relevant to each field
+	
+	Convertit une branche XML sous la forme de tous ses sous-éléments
+	   en une liste de tokens matchables (instances de XTokinfo)
+	   (avec 2 tags src=xip,tgt=xop + 1 ou psieurs contenus=str + 1 re)
+	   dont certains spécifiquement groupés pour le modèle crf citations
+	
+	Difficulté à voir: il peut y avoir plus de tokens que d'éléments
+	   par ex: <biblScope unit="page" from="20" to="31" />
+	   => donne 2 tokens "20" et "31"
+	
+	Les tags et la regexp du token sont stockés dans son instance 
+	   tag src => xpath simple en y ajoutant les attributs clé
+	   tag tgt => tag src traduit via STRUCT_TO_BIBL pour tei:biblStruct => tei:bibl
+	   regexp => match défini dans classe XToken
 	"""
-	# integers to be found (indices)
-	debut = None
-	fin = None
 	
-	# var remplie ssi vu l'expression /References:?/
-	# => simplifie la recherche du début !
-	ref_header_i0 = None
-	re_linereferences_header = re.compile(r"^R ?[Ee] ?[Ff] ?[Ee] ?[Rr] ?[Ee] ?[Nn] ?[Cc] ?[Ee] ?[Ss]?s*:?\s*$")
-	
-	# decompte de 'clues'
-	# ===================
-	# on mesure les occurrences dans pdflines de:
-	#   - search_toks : tout fragment connu xbib
-	#   - re_... : helper tokens = certaines propriétés biblio-like
-	#                              (commence par majusc, label, etc)
-
-	# n = nombre de lignes
-	n_lines = len(rawtxtlines)
-	
-	# --------------
-	# xmlelts tokens
-	# --------------
-	# count array for each match re.search(r'xmlelts', textline)
-	tl_match_occs = []
-	
-	# pour décompte un pré-préalable : 
-	# regex compile each token found in the xml
-	search_toks = set()
-	for st in xmltexts:
-		for tok in re.split(r"\W+", st):
-			if is_searchable(tok):
-				etok = re.escape(tok)
-				search_toks.add(re.compile(r"\b%s\b" % etok))
-	
-	# TODO : est-ce que les noms communs du XML content devraient être enlevés ?
-	# cf. ech/tei.xml/oup_Geophysical_Journal_International_-2010_v1-v183_gji121_3_gji121_3xml_121-3-789.xml
-	
-	if debug >= 2:
-		print (search_toks, "<== Those are the searched tokens", file=sys.stderr)
-	
-	
-	# -------------
-	# helper tokens (puncts, digits, capitalized letters)
-	# -------------
-	# pdc toks count array
-	pdc_match_occs = []
-	
-	# date + ponctuation (très caractéristique des lignes refbib) : exemples "(2005)", "2005a," 
-	re_datepunct = re.compile(r"[:;,.\(\[]?\s?(?:18|19|20)[0-9]{2}[abcde]?\s?[:;,.\)\]]")
-	# exemples : "68(3):858-862" ou "68: 858-862" ou "68: 858"
-	re_vol_infoA = re.compile(r"[0-9]+(?:\([0-9]+\))?\s?:\s?[0-9]+\s?(?:[-‒–—―−﹣]\s?[0-9]+)?")
-	# exemples : "vol. 5, no. 8, pp. 1371"   "Vol. 5, No. 8, pp 1371-1372
-	re_vol_infoB = re.compile(r"\b[Vv]ol\.?\s?[0-9]+\s?[,\.;]\s?[Nn]o\.?\s?[0-9]+\s?[,\.;]\s?pp?\.?\s?\d+\s?[-–]?\s?\d*")
-	# exemples : "68(3), 858-862" ou "68, 858-862"
-	re_vol_infoC = re.compile(r"[0-9]+(?:\([0-9]+\))?\s?,\s?[0-9]+\s?[-‒–—―−﹣]\s?[0-9]+")
-	
-	# reconnaissance de fragments très générique : marche uniquement car vol n'est pas un mot (l'équivalent pour "No" serait irréaliste)
-	re_vol = re.compile(r"\b[Vv]ol\.?(?=[\s\d])")
-	re_ppA = re.compile(r"\bpp\.?(?=[\s\d])")
-	re_ppB = re.compile(r"\b[0-9]+\s?[-‒–—―−﹣]\s?[0-9]+\b")
-	# plus rares mais surs (à cause de la présence du ':')
-	re_in = re.compile(r"\b[Ii]n ?:")
-	re_doi = re.compile(r"\bdoi: ?10\.[\S]+")
-	
-	# re_init <=> intéressants seulement en début de ligne -> re.match
-	re_initlabel = re.compile(r"\[.{1,4}\]")
-	re_initcapncap = re.compile(r"(?:\[.{1,4}\])\s*[A-Z].*?\b[A-Z]")
-	
-	# -------------------
-	# boucle de décompte 
-	# -------------------
-	for i, tline in enumerate(rawtxtlines):
-		# new initial counts for this line
-		tl_match_occs.append(0)
-		pdc_match_occs.append(0)
+	toklist = []
+	for xelt in xml_elements:
+		base_path = simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
 		
-	# filter out very short text lines
-		if len(tline) <= 2:
-			next
-		
-		# - - - - - - - - - - - - - - - - - - - -
-		# décompte principal sur chaque xfragment
-		# - - - - - - - - - - - - - - - - - - - -
-		for tok_xfrag_re in search_toks:
-			# 2 points if we matched an XML content
-			if re.search(tok_xfrag_re, tline):
-				tl_match_occs[i] += 2
-		
-		# décompte indices complémentaires
-		# indices forts => 2 points
-		pdc_match_occs[i] += 2 * len(re.findall(re_datepunct, tline))
-		pdc_match_occs[i] += 2 * len(re.findall(re_vol_infoA, tline))
-		pdc_match_occs[i] += 2 * len(re.findall(re_vol_infoB, tline))
-		pdc_match_occs[i] += 2 * len(re.findall(re_vol_infoC, tline))
-		pdc_match_occs[i] += 2 * len(re.findall(re_in, tline))
-		pdc_match_occs[i] += 3 * len(re.findall(re_doi, tline))
-		
-		# indices plus heuristiques => 1 points
-		pdc_match_occs[i] += 1 * len(re.findall(re_vol, tline))
-		pdc_match_occs[i] += 1 * len(re.findall(re_ppA, tline))
-		pdc_match_occs[i] += 1 * len(re.findall(re_ppB, tline))
-		
-		# indices ancrés sur ^ 
-		# initlabel
-		if re.match(re_initlabel, tline):
-			pdc_match_occs[i] += 2
-		
-		# initcap
-		if re.match(re_initcapncap, tline):
-			pdc_match_occs[i] += 2
-		
-		# -------------------8<-----------------------
-		# au passage si on trouve le début directement
-		# (ne fait pas partie des décomptes mais même boucle)
-		if re.match(re_linereferences_header, tline):
-			# on reporte ça servira plus tard
-			ref_header_i0 = i
-		# -------------------8<-----------------------
-		
-		# listing d'observation détaillée
-		if debug >= 2:
-			print("-"*20+"\n"+"line n. "+str(i)+" : "+tline, file=sys.stderr)
-			print("found %i known text fragments from XML content" %  tl_match_occs[i], file=sys.stderr)
-			print("found %i typical bibl formats from helper toks" % pdc_match_occs[i] + "\n"+"-"*20, file=sys.stderr)
-	
-	# sum of 2 arrays
-	all_occs = [(tl_match_occs[i] + pdc_match_occs[i]) for i in range(n_lines)]
-	
-	# log: show arrays
-	if debug >= 3:
-		print("tl_match_occs\n",tl_match_occs, file=sys.stderr)
-		print("pdc_match_occs\n",pdc_match_occs, file=sys.stderr)
-	if debug >= 2:
-		print("all_match_occs\n",all_occs, file=sys.stderr)
-	
-		# type de résultat obtenu dans tl_match_occs (seq de totaux par ligne):
-		# [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 5, 8, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-		#  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0,
-		#  7, 3, 6, 1, 3, 10, 0, 0, 11, 8, 2, 0, 0]
-		
-		# !! potentiellement jusqu'à 20 fois + gros
-	
-	
-	# -----------------------
-	# Répérage proprement dit
-	
-	# LE DEBUT
-	# ========
-	
-	# cas si on a déjà le début 
-	# --------------------------
-	if ref_header_i0 is not None:
-		# la ligne après l'entête
-		debut = ref_header_i0 + 1
-	
-	else:
-		# identification début si on n'a qu'une bib
-		# -----------------------------------
-		if (len(xmlbibnodes) == 1):
-			# cas un peu spécial : 
-			# ==> on ne peut pas compter sur vérifs des lignes d'avant/après
-			# ==> on prend la ligne max puis éventuellement suivante(s)
-			
-			argmax_i = all_occs.index(max(all_occs))
-			debut = argmax_i
-		
-		# identification si on a plusieurs bibs
-		# -----------------------------------------------
-		# Décision d'après all_occs avec grand lookahead
-		# -----------------------------------------------
-		else:
-			# all_occs => Là-dedans on cherche une zone 
-			#            avec des décomptes :
-			#              - assez hauts
-			#              - plutôt consécutifs,
-			#              - formant une séquence de taille 
-			#                de 1 à ~7 fois la longueur de nxbibs
-			
-			# !! sans se faire piéger par les appels de citation,
-			# !! qui provoquent des pics du décompte de matches, mais plus épars 
-			
-			# Dans l'exemple d'all_occs plus haut, la liste biblio 
-			# est sur les lignes [160:170] et commence par [7,3,6,..]
-			# Mais le pic à 5 puis 8 est un piège... 
-			
-			# On peut éviter les pics locaux si on regarde les sommes
-			# sur une fenêtre ou chunk de l lignes un peu plus gros
-			
-			# -----------------------------------------------------
-			# large sliding lookahead window over sums in all_occs
-			desired_chunk_span = ceil(3.2 * len(xmlbibnodes))
-			# param 3.2 fixé après quelques essais 
-			# dans doc/tables/test_pdf_bib_zone-pour_ragreage.ods
-			
-			if debug >= 2:
-				print("looking for debut_zone in Σ(occs_i...occs_i+k) over all i, with large window span k", desired_chunk_span, file=sys.stderr)
-			
-			# score le + haut ==> sera celui de la zone dont les contenus  
-			#                     correspondent le plus à ceux des xbibs
-			max_chunk = -1
-			
-			# i correspondant au (dernier) score le plus haut
-			i_last_max_chunk = -1
-			
-			# sums by chunk starting at a given i
-			summs_by_chunk_from = []
-			
-			for i,ici in enumerate(all_occs):
-				
-				# init sum
-				summs_by_chunk_from.append(0)
-				
-				for k in range(desired_chunk_span):
-					# stop count at array end
-					if (i + k) >= n_lines:
-						break
-					# normal case : add freq count
-					else:
-						summs_by_chunk_from[i] += all_occs[i+k] 
-				
-				# TODO £ : max normal = last max => simplifier 15 lignes:
-				
-				# judge last max 
-				# (if window span is a little over the real 
-				#  length of the bib zone in the pdf
-				#  then *last* max should be right answer)
-				if summs_by_chunk_from[i] == max_chunk:
-					i_last_max_chunk = i
-				if summs_by_chunk_from[i] > max_chunk:
-					max_chunk = summs_by_chunk_from[i]
-					i_last_max_chunk = i
-				
-				if debug >= 4:
-					# affiche chaque step
-					print("line", i,
-					  "this sum", summs_by_chunk_from[i],
-					  "last max sum", max_chunk,
-					  "idx of last max", i_last_max_chunk, file=sys.stderr)
-			
-			if debug >= 3:
-				print("windowed sums:", summs_by_chunk_from, file=sys.stderr)
-			
-			# Décision début
-			# --------------
-			
-			# début: je suis sur que c'est lui !
-			debut = i_last_max_chunk
+		loc_name = localname_of_tag(xelt.tag)
 		
 		if debug >= 2:
-			print("max_chunk:", max_chunk, "\nfrom i:", debut, file=sys.stderr)
+			print("***", file=sys.stderr)
+			print("base_path   :", base_path, file=sys.stderr)
+			print("text content:", xelt.text, file=sys.stderr)
 		
-	# LA FIN
-	# ======
-	
-	# Décision avec petit lookahead
-	# ------------------------------
-	# on a encore besoin d'une fenêtre
-	# mais plus courte (~ 10 lignes)
-	# pour trouver la descente
-	shorter_span = min(int(len(xmlbibnodes)/2), 10)
-	
-	if debug >= 2:
-		print("looking for fin_zone in Σ(occs_i...occs_i+l) over all i > debut, with with small window span l", shorter_span, file=sys.stderr)
-	
-	summs_shorter_lookahead = []
-	for i in range(n_lines):
-		summs_shorter_lookahead.append(0)
-		# inutile de se retaper tout le début du doc avant début zone
-		if i < debut:
-			next
-		for l in range(shorter_span):
-			if (i + l) >= n_lines:
-				break
+		
+		# PLUSIEURS CAS PARTICULIERS spécifiques aux biblios
+		# -------------------------------------------------------
+		# (autrement simplement :  tok.xtexts      = xelt.text 
+		#                       et tok.xml_in_path = base_path)
+		# -------------------------------------------------------
+		
+		# cas particulier *date*
+		if loc_name == 'date':
+			# soit 1 token normal
+			if xelt.text:
+				tok = XTokinfo(s=xelt.text, xip=base_path)
+				toklist.append(tok)
+			# soit token dans la valeur d'attribut
 			else:
-				summs_shorter_lookahead[i] += all_occs[i+l]
-	
-	# curseur temporaire à l'endroit le plus court possible (si une ligne par xbib)
-	fin = debut + len(xmlbibnodes)
-	
-	# prolongement portée jq vraie fin : 
-	while summs_shorter_lookahead[fin+1] > 0:
-		# tant que freq_suivants > 0:
-		# on suppose des continuations consécutive de la liste des biblios
-		# ==> on décale la fin
-		fin += 1
-	
-	if debug >= 2:
-		print("found probable end of zone at %s", fin, file=sys.stderr)
-	
-	# log résultat
-	print ("deb: ligne %s (\"%s\")\nfin: ligne %s (\"%s\")"
-		   %(
-		     debut, "_NA_" if debut is None else rawtxtlines[debut] ,
-		     fin, "_NA_" if fin is None else rawtxtlines[fin]
-		     ),
-		  file=sys.stderr)
-	
-	# filtre si début beaucoup trop tot
-	# comparaison len(bibs) len(pdflines)
-	if (nxb * 8 <  (fin - debut)):
-		print ("WARN ça fait trop grand, je remets deb <- None", file=sys.stderr)
-		debut = None
-	
-	return (debut, fin)
+				tok = XTokinfo(s=xelt.get('when'), xip="%s/@%s" % (base_path, 'when'))
+				toklist.append(tok)
 
-# --------------------------------------------------------
+		# cas particuliers *pagination*: 
+		elif loc_name == 'biblScope' and xelt.get('unit') in ['page','pp']:
+			# soit un biblScope normal
+			if xelt.text:
+				tok = XTokinfo(s=xelt.text, xip='%s[@unit="pp"]' % base_path)
+				toklist.append(tok)
+			# soit 2 tokens dans les attributs
+			else:
+				tok1 = XTokinfo(s=xelt.get('from'), xip='%s[@unit="pp"]/@from' % base_path)
+				tok2 = XTokinfo(s=xelt.get('to'),   xip='%s[@unit="pp"]/@to' % base_path)
+				toklist.append(tok1, tok2)
 
-def glance_xbib(bS, longer = False):
-	"""Donne un infostr ou aperçu du contenu d'une biblio structurée XML
-	
-	Arguments:
-		bS -- l'entrée biblio
-		longer -- un booléen pour format étendu 
-	"""
-	# variables du glance
-	# article title if present, or monog title, or nothing 
-	main_title  = None
-	main_author = None
-	the_year  = None
-	the_id    = None
-	
-	# id
-	id_elt = bS.xpath("@xml:id")
-	if len(id_elt):
-		the_id = id_elt[0]
+		# tous les autres biblScope (vol, iss...) pour préserver leur @unit
+		elif loc_name == 'biblScope':
+			this_unit = xelt.get('unit')
+			tok = XTokinfo(s=xelt.text, xip='%s[@unit="%s"]' % (base_path, this_unit))
+			toklist.append(tok)
+
+		# les title avec leur @level
+		# NB : xelt.text is not None devrait aller de soi et pourtant... pub2tei
+		elif loc_name == 'title' and xelt.text is not None:
+			this_level = xelt.get('level')
+			if this_level == None:
+				this_level="___"
+			tok = XTokinfo(s=xelt.text, xip='%s[@level="%s"]' % (base_path, this_level))
+			toklist.append(tok)
+
+		# les noms/prénoms à prendre ensemble quand c'est possible...
+		# Pour cela on les traite non pas dans les enfants feuilles
+		# mais le plus haut possible en analytic|monogr/author
+		elif loc_name in ['author','editor']:
+			# du coup l'arg s du token est un peu différent des autres:
+			# il contient une liste de str à combiner pour la regex
+			# au lieu d'un str simple
+			str_list = [s for s in xelt.itertext()]
+			nametok = XTokinfo(s=str_list, xip=base_path)
+			toklist.append(nametok)
+			
+			#~ print ("+++combitok", base_path, xelt.text)
 		
-	# date
-	date_elts = bS.xpath(".//tei:imprint/tei:date", namespaces=NSMAP)
-	if len(date_elts) == 1:
-		# 2 manières de noter la date: attribut when ou contenu balise
-		# si attribut @when
-		if "when" in date_elts[0].keys():
-			the_year = date_elts[0].get("when")[0:4]
-		# sinon contenu
+		# du coup on ne re-traite pas tous les enfants du précédent
+		elif re.search(r'(?:author|editor)/.', base_path):
+			#~ print ("!!!skipping", base_path, xelt.text)
+			continue
+
+		# normalement on a déjà traité tous les cas 
+		# avec texte vide, attribut intéressant
+		# => ne reste que des texte vide inintéressants
+		elif xelt.text is None:
+			continue
+
+		# === cas normal ===
 		else:
-			the_year = date_elts[0].text[0:4]
-	# sinon la date reste à None
-	elif len(date_elts) > 1:
-		print ("plusieurs dates", file=sys.stderr)
-	
-	# check bool entrée analytique ??
-	has_analytic  = (len(bS.xpath("tei:analytic", namespaces=NSMAP)) > 0)
+			tok = XTokinfo(s=xelt.text, xip=base_path)
+			toklist.append(tok)
 	
 	
-	if has_analytic:
-		ana_tit_elts = bS.xpath("tei:analytic/tei:title", namespaces=NSMAP)
-		if len(ana_tit_elts):
-			main_title = ana_tit_elts[0].text 
+	# XTokinfo array
+	return toklist
+
+
+def match_citation_fields(raw_lines, this_xbib, label="", debug=0):
+	"""Matches field info in raw txt string
+	   returns(output_xml_string, success_bool)
+	   
+	En particulier, report des tags <bibl> sur une refbib"""
+	
+	# - log -
+	if debug > 0:
+		print("\n"+"="*50, file=sys.stderr)
 		
-		ana_au_elts = bS.xpath("tei:analytic/tei:author//tei:surname", namespaces=NSMAP)
-		if len(ana_au_elts):
-			main_author = ana_au_elts[0].text
+		# rappel input XML
+		print("XML entry:", rag_procedures.glance_xbib(this_xbib) + "\ncontenus texte xmlbib %i" % j, file=sys.stderr)
+		print(etree.tostring(this_xbib, pretty_print=True).decode("ascii") + ("-"*50), file=sys.stderr)
+		
+		# rappel input raw (pdfin ou txtin)
+		print("PDF lines: \"%s\"" % raw_lines, file=sys.stderr)
+		print(re_TOUS.findall(raw_lines), file=sys.stderr)
+		print("\n"+"-"*50, file=sys.stderr)
 	
-	# on va chercher auteur et titre dans monogr si ils manquaient dans analytic
-	if (main_title is None):
-		monogr_tit_elts = bS.xpath("tei:monogr/tei:title", namespaces=NSMAP)
-		if len(monogr_tit_elts):
-			main_title = monogr_tit_elts[0].text
+	
+	# on prépare les infos XML qu'on s'attend à trouver
+	# ------------------------
+	
+	# parcours de l'arbre
+	
+	# on utilise iter() et pas itertext() pour avoir les chemins rel
+	# + on le fait sous la forme iter(tag=elt) pour avoir les éléments
+	#   et pas les commentaires
+	subelts = [xelt_s for xelt_s in this_xbib.iter(tag=etree.Element)]
+	
+	# tokenisation
+	# - - - - - - - - - - - - - -
+	# ajouter label en 1er token
+	toklist = [XTokinfo(s=str(label),xip="label")] 
+	
+	# Tous les autres tokens:
+	
+	# la boucle part des éléments xml (contenus attendus) pour
+	# créer une liste de tokens avec à réintégrer à l'autre flux:
+	#   - les contenus => point d'ancrage qui dira *où* réintégrer
+	#                  => génère une expression régulière à trouver
+	#   - leur balise  => décrit *ce que* l'on va réintégrer comme infos
+	#                  => obtenue par table corresp selon relpath actuel
+	# - - - - - - -
+	# methode 1 : appel fonction cas par cas
+	toklist += biblStruct_elts_to_match_tokens(subelts, this_xbib)
+	
+	# - - - - - - -
+	# méthode 2 générique
+	#~ toklist = [XTokinfo(
+	              #~ s=xelt.text,
+	              #~ xip=simple_path(xelt, relative_to = localname_of_tag(this_xbib.tag))
+	              #~ ) for xelt in subelts if xelt.text not in [None, ""]]
+	# - - - - - - - - - - - - - -
+	 # print("TOKLIST", toklist)
+	
+	# on matche les infos XML sur le flux PDFTXT
+	# ------------------------------------------
+	
+	# spécifique biblStruct:
+	# correspondances tag d'entrée => le tag de sortie
+	for l, tok in enumerate(toklist):
+		
+		# pour vérifs : todo stat dessus passée en //
+		my_doubt = False
+		
+		# debug
+		if debug >= 1:
+			print("XTOK",l,tok, file=sys.stderr)
+		
+		# sanity check A : the xmlstr we just found
+		if tok.xtexts is None:
+			print("ERR: no xmlstr for %s" % tok.relpath, file=sys.stderr)
+			my_doubt = True
+			continue
+		
+	
+		# 3) on matche -------------------------------------------
+		#  £ TODO procéder par ordre inverse de longueur !!
+		n_matchs = len(re.findall(tok.re,raw_lines))
+		# --------------------------------------------------------
+		
+		# sanity check B : "there can be only one" !
+		if n_matchs > 1:
+			if debug >= 2:
+				print("ERR: '%s' (%s) matches too many times" % (tok.xtexts, tok.relpath), file=sys.stderr)
+			my_doubt = True
+			continue
+		
+		# quand tok.xtexts == "__group__" au moins un des 2 ne matche pas
+		elif n_matchs < 1:
+			if debug >= 2:
+				print("ERR: no rawtxt match for XToken '%s' (%s) aka regexp /%s/" % (tok.xtexts, tok.relpath, tok.re.pattern), file=sys.stderr)
+			my_doubt = True
+			continue
+		
+		# 4) si on a un unique match => on le traite --------------
 		else:
-			main_title = "_NA_"
+			# substitution
+			if args.mask:
+				#~ pseudo_out = "__%s__" % tok.tagout
+				pseudo_out = "__"
+			else:
+				# remplacement normal : tag de sortie
+				pseudo_out = tok.tagout + r"\1" + tok.endout
+			raw_lines = re.sub(tok.re,pseudo_out,raw_lines)
+		# --------------------------------------------------------
 	
-	if (main_author == None):
-		monogr_au_elts = bS.xpath("tei:monogr/tei:author//tei:surname", namespaces=NSMAP)
-		if len(monogr_au_elts):
-			main_author = monogr_au_elts[0].text
-		else:
-			main_author = "_NA_" # on ne laisse pas à None car on doit renvoyer str
+	# SEPARATEUR SAUT DE LIGNE => format sortie reference-segmenter
+	new_lines = re.sub("£","<lb/>",raw_lines)
 	
-	# NB : il peuvent éventuellement toujours être none si éléments à texte vide ?
 	
-	# build "short" string
-	my_desc = "("+main_author[:min(5,len(main_author))]+"-"+str(the_year)+")" 
+	# dernier correctif: groupements de tags
+	# ------------------
 	
-	# optional longer string
-	#~ if longer:
-		#~ maxlen = min(16,len(main_title))
-		#~ my_desc = the_id+":"+my_desc+":'"+main_title[:maxlen]+"'"
+	# -a- pages collées pour le modèle citation
+	new_lines = re.sub(r'<pp>', r'<biblScope type="pp">',
+			  re.sub(r'</pp>', r'</biblScope>',
+			 re.sub(r'(<pp>.*</pp>)',strip_inner_tags,
+			new_lines)))
 	
-	return my_desc
-
-# --------------------------------------------------------
-
-def is_searchable(a_string):
-	"""Filtre des chaînes texte
-		------------------------
-		Retourne:
-		  - False: chaînes de caractères ne pouvant servir 
-		           comme requêtes de recherche
-		  - True : toute autre chaîne
-	""" 
-	return ((a_string is not None) 
-	       and (len(a_string) > 1)
-	       and (not re.match("^\s+$",a_string))
-	       and ( # tout sauf les mots très courts sans majuscules (with, even..)
-	               len(a_string) > 4 
-	            or re.match("^[A-Z0-9]", a_string)
-	           )
-	       )
+	# -b- auteurs groupés
+	new_lines = re.sub(r'(<author>.*</author>)',strip_inner_tags, new_lines)
+	
+	new_lines = "<bibl>"+new_lines+"</bibl>"
+	
+	
+	return(new_lines, not(my_doubt))
 
 
-# --------------------------------------------------------
 # --------------------------------------------------------
 
 
 class XTokinfo:
 	"""Groups infos about a str token found in the source XML"""
-	def __init__(self, s="", p="", t="", re=None):
-		# token
-		self.xmlstr = s
-		# xpath of src element in <biblStruct>
-		self.relpath = p
-		# flat xml elt in <bibl>
-		self.tagout = t
-		# regexp
-		self.re = re
 	
-	def make_pre_regexp(self):
-		"""Just the raw regexp string without capture"""
-		subtokens = re_tous.findall(self.xmlstr)
-		esctokens = [t for t in map(re.escape,subtokens)]
-		my_re_str = "[\W£]*".join(r'%s' % u for u in esctokens)
-		# print ("re_str : /%s/" % my_re_str)
-		return my_re_str
+		
+	# MAP (biblStruct => bibl) to choose the final citation's 'out tag'
+	STRUCT_TO_BIBL = {'analytic/title[@level="a"]' :            '<title level="a">',
+						  'analytic/title/hi' :                 '__rmtag__',  # todo effacer le tag
+						  'analytic/title/title/hi' :           '__rmtag__',
+						  'analytic/author/persName/surname' :  '<author>',
+						  'analytic/author/persName/forename': '<author>',
+						  'analytic/author/forename' :          '<author>',
+						  'analytic/author/surname' :           '<author>',
+						  'analytic/author/orgName' :           '<author>',  # ? orgName en <bibl> ?
+						  'analytic/author' :                   '<author>',
+						  'analytic/respStmt/name' :            '<author>',
+						  'monogr/author/persName/surname' :       '<author>',  # <!-- monogr -->
+						  'monogr/author/persName/forename' :        '<author>',
+						  'monogr/author/orgName' :                   '<author>',  # ? orgName en <bibl> ?
+						  'monogr/author' :                           '<author>',
+						  'monogr/respStmt/name' :                    '<author>',
+						
+						  # à vérifier
+						  'monogr/imprint/edition' :                  '<note type="edition">',  
+						
+						  'monogr/imprint/meeting' :                  '<title level="m">',
+						  'monogr/meeting' :                          '<title level="m">',
+						  'monogr/imprint/date' :                     '<date>',
+						  'monogr/imprint/date/@when' :               '<date>',
+						  'monogr/title[@level="j"]' :                '<title level="j">',
+						  'monogr/title[@level="m"]' :                '<title level="m">',
+						  
+						  'monogr/imprint/biblScope[@unit="vol"]' :   '<biblScope type="vol">',
+						  'monogr/imprint/biblScope[@unit="issue"]': '<biblScope type="issue">',
+						  'monogr/imprint/biblScope[@unit="part"]' :  '<biblScope type="chapter">',
+						  'monogr/imprint/biblScope[@unit="chap"]' :  '<biblScope type="chapter">',
+						  'monogr/imprint/publisher' :                '<publisher>',
+						  'monogr/imprint/pubPlace' :                 '<pubPlace>',
+						  'monogr/meeting/placeName' :                '<pubPlace>',
+						  'monogr/editor/persName/surname' :       '<editor>',
+						  'monogr/editor/persName/forename' :      '<editor>',
+						  'monogr/editor' :                        '<editor>',
+						  'series/title[@level="s"]' :          '<title level="s">',
+						  'series/biblScope[@unit="vol"]' :     '<biblScope type="vol">',
+						  'note' :                              '<note>',
+						  'monogr/idno' :                       '<idno>',
+						  'analytic/idno' :                     '<editor>',
+						  'note/ref' :                          '<ptr type="web">',
+						  'ref' :                               '<ptr type="web">',
+						  
+						  # pour fusion ulterieure de 2 tags <pp> ensemble
+						  'monogr/imprint/biblScope[@unit="pp"]': '<pp>',
+						  
+						  # sinon normal: 'monogr/imprint/biblScope[@unit="pp"]': '<biblScope type="pp">',
+						  
+						  
+						  # if bS has note which contains « thesis », publisher is a university
+							# 'monogr/imprint/publisher': 'orgName',
+						  						  # pour fusion ulterieure de 2 tags <pp> ensemble
+						  
+						  # inséré à part
+						  'label': '<label>',
+						  }
+
+
+	# sert pour recombiner des tokens séparés: par ex " " ou ""
+	BLANK = " "
 	
-	def make_regexp(self, prepared_re_str = None):
-		"""The precompiled regexp with capture around"""
-		# A1) récup d'une chaîne échappée
-		if prepared_re_str is None:
-			re_str = self.make_pre_regexp()
-		# A2) ou préalablement construite
+	
+	
+	# =================================================
+	# initialisation
+	def __init__(self, s="", xip=""):
+		# 1) Initialisation str <= contenu(s) et xip <= src_path
+		# -------------------------------------------------------
+		# CONTENUS SELF.XTEXTS
+		if type(s) == str:
+			# token = 1 str (<= usually text content of the xml elt)
+			self.xtexts = s
+			self.combimode = False
+		
+		# token = k strings together in any order
+		# initialisation combinée avec une liste str appelé s_list
+		# ex: nom + prénom 
+		elif type(s) == list:
+			self.xtexts = s
+			self.combimode = True
+			
 		else:
-			re_str = prepared_re_str
+			raise TypeError(type(s))
+		
+		# xpath of src element in <biblStruct>
+		# XIP
+		self.relpath = xip
+		
+		# 2) on crée des expressions régulières pour le contenu
+		# -------------------------------------------------------
+		# SELF.RE
+		# "J Appl Phys" ==> r'J(\W+)Appl(\W+)Phys'
+		# £ TODO : autoriser un tiret n'importe ou dans les mots des
+		#          longs champs !!
+		# => les chaînes seront matchables dans les 2 ordres possibles
+		# ex: /nom\W*prénom/ et /prénom\W*nom/
+		self.re = self.tok_full_regexp()
+		
+		# 3) on récupère ce qui deviendra le tag de sortie
+		# -------------------------------------------------
+		# SELF.TAGOUT
+		# opening tag
+		self.tagout = XTokinfo.xmlin_path_to_xmlout(self.relpath)
+		# closing tag
+		self.endout = re.sub(r'^<','</', re.sub(r' .*$','>', self.tagout))
+		
+	
+	# =================================================
+	# correspondance des annotations I/O
+	def xmlin_path_to_xmlout(relpath, context=None):
+		"""
+		Translate an input structrured path into desired output markup
+		"""
+		# for this we use the global var : STRUCT_TO_BIBL
+		# todo define ~ config.IN_TO_OUT with param table
+		return XTokinfo.STRUCT_TO_BIBL[relpath]
+	
+	
+	
+	# =================================================
+	# préparation d'une regexp pour un string donné
+	def str_pre_regexp(self, anystring):
+		"""Just the raw regexp string without capture"""
+		# A) préparation du contenu
+		# --------------------------
+		subtokens = re_TOUS.findall(anystring)
+		esctokens = [t for t in map(re.escape,subtokens)]
+		# TODO ajouter ici possibilité tirets de césure
+		my_re_str = "[\W£]*".join(r'%s' % u for u in esctokens)
 		
 		# B) Décision du format des limites gauche et droite pour les \b
+		# --------------------------------------------------
 		# test si commence par une ponctuation échappée
-		if re.match('\\\\*\W',re_str):
-			prefix = "("
+		if re.match('\\\\*\W',my_re_str):
+			prefix = ""
 		else:
-			prefix = "\\b("
-		
+			prefix = "\\b"
 		# idem mais plus facile à la fin
-		if re.search('\W$', re_str):
-			postfix = ")"
+		if re.search('\W$', my_re_str):
+			postfix = ""
 		else:
-			postfix = ")\\b"
+			postfix = "\\b"
 		
-		# C) construction de l'expression régulière
-		my_regexp = prefix + re_str + postfix
-		return re.compile(my_regexp)
+		# voilà
+		return prefix + my_re_str + postfix
+	
+	# =================================================
+	# construction de l'expression régulière à partir
+	# de toutes sortes de strings seuls ou couplés
+	def tok_full_regexp(self):
+		"""The precompiled regexp with alternatives and parens around"""
+		re_str=""
+		
+		# => cas normal : une seule chaîne dans self.xtexts
+		if not self.combimode:
+			# récup d'une seule chaîne échappée
+			re_str = self.str_pre_regexp(self.xtexts)
+		
+		# => plusieurs chaînes matchables dans les 2 ordres possibles
+		# ex: ['nom', 'prénom'] => /((?:nom\W*prénom)|(?:prénom\W*nom))/
+		elif self.combimode:
+			alternatives = []
+			for substr_combi in permutations(self.xtexts):
+				# jonction par un espace ou toute valeur de XTokinfo.BLANK
+				str_combi = XTokinfo.BLANK.join(substr_combi)
+				re_combi = self.str_pre_regexp(str_combi)
+				
+				# non capturing
+				alternatives.append("(?:"+re_combi+")")
+			
+			# -or- using regex pipe
+			re_str = "|".join(alternatives)
+		
+		# enfin ajout de balises de capture extérieures
+		# et compilation
+		my_regexp_object = re.compile("("+re_str+")")
+		return my_regexp_object
 	
 	
 	
 	
 	def __str__(self):
-		return "%s : '%s' : %s" % (self.relpath, self.xmlstr, self.tagout)
-		# return "'%s' : %s" % (self.xmlstr, self.tagout)
+		return "%s : '%s' : %s" % (self.relpath, self.xtexts, self.tagout)
+		# return "'%s' : %s" % (self.xtexts, self.tagout)
 	
 	def __repr__(self):
 		return "<%s>" % self.__str__()
@@ -1304,15 +713,14 @@ class XTokinfo:
 
 
 
-
-
-
-
-
 ###############################################################
 ########################### M A I N ###########################
 ###############################################################
 if __name__ == "__main__":
+	
+	# represents hope that all 3 steps go well
+	checklist = [True, True, True]
+	
 	
 	# options et arguments
 	# ====================
@@ -1344,15 +752,14 @@ if __name__ == "__main__":
 		sys.exit()
 	
 	
-	NSMAP = {'tei': "http://www.tei-c.org/ns/1.0"}
 	# query query
 	xbibs = dom.findall(
 				"tei:text/tei:back//tei:listBibl/tei:biblStruct",
-				namespaces=NSMAP
+				namespaces=rag_procedures.NSMAP
 				)
 	xbibs_plus = dom.xpath(
 				"tei:text/tei:back//tei:listBibl/*[local-name()='bibl' or local-name()='biblStruct']",
-				 namespaces=NSMAP
+				 namespaces=rag_procedures.NSMAP
 				)
 	
 	# pour logs
@@ -1363,6 +770,9 @@ if __name__ == "__main__":
 	# si présence de <bibl>
 	if (nxbof > 0):
 		print("WARN: %i entrées dont  %i <bibl> (non traitées)" % (nxb+nxbof, nxbof), file=sys.stderr)
+		
+		# incomplétude du résultat à l'étape 0
+		checklist[0] = False
 	
 	# exception si aucune <biblStruct>
 	if (nxb == 0):
@@ -1370,69 +780,77 @@ if __name__ == "__main__":
 		sys.exit()
 	
 	
-	# préalable: passage en revue des XML ~> diagnostics (vars globales)
+	# préalable: passage en revue des XML ~> diagnostics IDs
 	# ----------
+	# initialisation IDs et NOs
+	xml_ids_map = [None for j in range(nxb)]
+	xml_nos_map = [None for j in range(nxb)]
 	
-	# pour corresp. indice j <=> n° XML:ID (si trouvé)
-	xmlidmap = [None for j in range(nxb)]
-	
-	
-	# tous les contenus texte des elts xml, en vrac
-	xmltexts = []
-	
-	# remplissage des deux: xmltexts et xmlidmap
+	# remplissage selon xpaths @id et @n
 	for j, xbib in enumerate(xbibs):
 		
-		thisbib_texts=[]
-		for eltstr in xbib.itertext():
-			thisbib_texts.append(eltstr)
-		
-		# TODO : vérifier si intéressant de les préserver séparément (liste de listes)
-		xmltexts += thisbib_texts
-		
-		thisbib_id = None
+		# il devrait toujours y avoir un ID, mais en réalité parfois absent
 		xbib_id_nodes = xbib.xpath("@xml:id") ;
 		
-		# liste des xbib IDs
-		NUMS = None
+		# si présent, l'attribut "@n" reprend le label (devrait toujours être numérique ?)
+		xbib_no_nodes = xbib.xpath("@n") ;
 		
-		if len(xbib_id_nodes):
-			thisbib_id = xbib.xpath("@xml:id").pop()
-			# au passage diagnostic consécutivité
+		found_id = (len(xbib_id_nodes) == 1)
+		found_no = (len(xbib_no_nodes) == 1 and type(xbib_no_nodes[0]) == int)
+		
+		# récup id et numérotation
+		if found_id and found_no:
+			# lecture attributs XML
+			thisbib_id = xbib_id_nodes.pop()
+			thisbib_no = xbib_no_nodes.pop()
+		
+		# récup id et astuce numérotation attendue en fin d'ID 
+		elif found_id and not found_no:
+			thisbib_id = xbib_id_nodes.pop()
 			
-			# -a- recup numérotation en fin d'ID 
-			
+			# on cherche le dernier nombre pour mettre dans xml_nos_map
 			# par ex: 1,2 ou 3 dans DDP278C1 DDP278C2 DDP278C3
-			NUMS = re.findall(r"[0-9]+", thisbib_id)
+			postfix_num_match = re.search(r"[0-9]+$", thisbib_id)
 			
-			# -b- verif
-			if (len(NUMS)) and (int(NUMS[-1]) == j+1) and (j == 0 or FLAG_STD_MAP): 
-				FLAG_STD_MAP = True
-			
-			# -c- on gardera NUMS pour les labels en sortie
+			if postfix_num_match:
+				thisbib_no = postfix_num_match.group(0)
+			else:
+				# rien trouvé pour le no: on mettra None dans xml_nos_map
+				thisbib_no = None
 		
-		# stockage
-		xmlidmap[j] = thisbib_id
+		# les 2 cas restants: trouvé no sans id OU trouvé aucun
+		else:
+			thisbib_id = None
+			thisbib_no = None
 		
-		# log si haut debug
-		if args.debug >= 2:
-			print(("-"*50)+ 
-		           "\nlecture des contenus texte xmlbib %i (@xml:id='%s')" 
-		              % (j, thisbib_id), file=sys.stderr)
-			print(thisbib_texts, file=sys.stderr)
+		# stockage de ce qu'on a trouvé
+		# -----------------------------
+		xml_ids_map[j] = thisbib_id
+		xml_nos_map[j] = thisbib_no
+		
 	
-	# // fin lecture xml bibs
+	# écriture dans variable globale pour les labels en sortie
+	LABELS = xml_nos_map
+	
+	# verif incrément normal a posteriori 
+	# (ce diagnostic pourrait aussi être fait dès la boucle) 
+	FLAG_STD_MAP = True # temporaire
+	for j, no in enumerate(xml_nos_map):
+		if (no is None) or (int(no) != j+1):
+			FLAG_STD_MAP = False
+	
 	
 	if args.debug >= 1:
-		print(xmlidmap, file=sys.stderr)
+		print("IDs:", xml_ids_map, file=sys.stderr)
+		print("NOs:", xml_nos_map, file=sys.stderr)
 		if FLAG_STD_MAP:
 			print("GOOD: numérotation ID <> LABEL traditionnelle", file=sys.stderr)
 		else:
 			# todo préciser le type de lacune observée (pas du tout de labels, ID avec plusieurs ints, ou gap dans la seq)
 			print("WARN: la numérotation XML:ID ne contient pas un label unique incrémental", file=sys.stderr)
-	
-	
 
+	# // fin lecture xml bibs
+	
 	
 	if args.txtin:
 		#  INPUT TXT à comparer
@@ -1440,10 +858,11 @@ if __name__ == "__main__":
 		print("---\nLECTURE FLUX TXT ISSU DE PDF", file=sys.stderr)
 		
 		try:
-			pdflines = [line.rstrip('\n') for line in open(args.txtin)]
+			rawlines = [line.rstrip('\n') for line in open(args.txtin)]
 		except FileNotFoundError as e:
 			print("I/O ERR: Echec ouverture du flux textin '%s': %s\n" % (e.filename,e.strerror), file=sys.stderr)
 			sys.exit(1)
+	
 	elif args.pdfin:
 		#  INPUT PDF à comparer
 		# ======================
@@ -1458,45 +877,65 @@ if __name__ == "__main__":
 			# print(e.output, file=sys.stderr)
 			sys.exit(1)
 		# got our pdf text!
-		pdflines = [line for line in pdftxt.split("\n")]
+		rawlines = [line for line in pdftxt.split("\n")]
+	
 	else:
 		print("ARG ERR: On attend ici --pdfin foo.pdf (ou alors --txtin bar.txt)", file=sys.stderr)
 		sys.exit(1)
 	
 	
-	print ("N lignes: %i" % len(pdflines), file=sys.stderr)
+	# pour logs
+	# ---------
+	npl = len(rawlines)
 	
+	print ("N lignes: %i" % npl, file=sys.stderr)
 	
-	
-	# TODO éventuellement quand pdf entier ?
-	# filtrer deux ou 3 lignes autour du FORM FEED ^L 
-	# pour essayer de virer les hauts et bas de page
-	
-	
-	#  Recherche zone biblio
-	# ========================
-	print("---\nFIND PDF BIBS", file=sys.stderr)
 	
 	# La zone biblio dans le texte  pdf est un segment marqué par 2 bornes
 	#       (par ex: d=60 et f=61 on aura |2| lignes intéressantes)
 	# ----------------------------------------------------------------------
-	(debut_zone, fin_zone) = find_bib_zone(xbibs, pdflines, debug=args.debug)
+	debut_zone = None
+	fin_zone = None
 	
-	#  !! debut_zone et fin_zone sont des bornes inclusives !!
-	#  !!         donc nos slices utiliseront fin+1         !!
-	#                      ------             -----
 	
-	if ((debut_zone == None) or  (fin_zone == None)):
-		print("ERR: trop difficile de trouver la zone biblio dans ce texte '%s'" % args.pdfin, file=sys.stderr)
-		sys.exit()
+	#    ============
+	# -a- Cas facile
+	# (si on a un txtin visant 'citations' ou 'reference-segmenter'
+	#  en entraînement, le flux ne contiendra *que* la zone des biblios
+	if (args.model_type in ["reference-segmenter", "citations"]):
+		debut_zone = 0
+		fin_zone = npl -1 
 	
+	#            =======================
+	# -b- sinon : Recherche zone biblio
+	else:
+		print("---\nFIND PDF BIBS", file=sys.stderr)
+		
+		(debut_zone, fin_zone) = rag_procedures.find_bib_zone(xbibs, rawlines, debug=args.debug)
+		
+		#  !! debut_zone et fin_zone sont des bornes inclusives !!
+		#  !!         donc nos slices utiliseront fin+1         !!
+		#                      ------             -----
+		
+		if ((debut_zone == None) or  (fin_zone == None)):
+			print("ERR: trop difficile de trouver la zone biblio dans ce rawtexte '%s'" % args.pdfin, file=sys.stderr)
+			sys.exit()
+	
+	
+	
+	# (à présent: match inverse)
+	
+	# =======================================
 	#  Alignement lignes txt <=> entrées XML
 	# =======================================
 	print("---\nLINK PDF BIBS <=> XML BIBS", file=sys.stderr)
-	# (à présent: match inverse)
 	
 	# get sequence over pdf content lines ids filled with best matching xml ids
-	winners = link_txt_bibs_with_xml(pdflines[debut_zone:fin_zone+1], xbibs, debug=args.debug)
+	winners = rag_procedures.link_txt_bibs_with_xml(
+	                   rawlines[debut_zone:fin_zone+1], 
+	                   xbibs, 
+	                   debug=args.debug
+	                   )
 	
 	# affiche résultat
 	print("Les champions: %s" % winners, file=sys.stderr)
@@ -1511,17 +950,23 @@ if __name__ == "__main__":
 	#             - or lines before 1st ref
 	#             - or lines after last ref
 	
+	
+	# TODO ici utilisation de xml_nos_map pour faire des tokens labels
+	
 	# vérification si on ne doit garder que les documents qui matchent bien
 	# (par exemple quand on génère un corpus d'entraînement)
-	if check_align_seq(winners):
-		# TODO déclarer avant
-		CONSECUTIF = True
+	# TODO
+	#~ if not check_align_seq(winners):
+		#~ 
+		#~ # désordre du résultat à l'étape 1
+		#~ checklist[1] = False
+	
 	
 	#---------------------------------------------------------------------------------
 	# then we group content from pdf (each txtline i') by its associated xml id j_win
 	# ---------------------------------------------------------------------------------
 	# résultat à remplir
-	xlinked_real_lines = [None for j in range(nxb)]
+	rawlinegroups_by_xid = [None for j in range(nxb)]
 	
 	for i_prime, j_win in enumerate(winners):
 		if j_win is None:
@@ -1531,48 +976,75 @@ if __name__ == "__main__":
 		# === normal case ===
 		else:
 			# nouveau morceau
-			if xlinked_real_lines[j_win] is None:
-				xlinked_real_lines[j_win] = pdflines[debut_zone+i_prime]
+			if rawlinegroups_by_xid[j_win] is None:
+				rawlinegroups_by_xid[j_win] = rawlines[debut_zone+i_prime]
 			# morceaux de suite
 			else:
 				# on recolle les lignes successives d'une même bib
 				# SEPARATEUR SAUT DE LIGNE 
 				#  => format sortie reference-segmenter: sera transformé en '<lb/>'
 				#  => format sortie citations: ignoré car matche /\W+/
-				xlinked_real_lines[j_win] += "£"+pdflines[debut_zone+i_prime]
-
+				rawlinegroups_by_xid[j_win] += "£"+rawlines[debut_zone+i_prime]
+	
 	# log détaillé de cette étape
-	if args.debug >= 3:
+	if args.debug >= 1:
 		# linked results
 		print("="*70, file=sys.stderr)
 		for j in range(nxb):
-			if xlinked_real_lines[j] is None:
-				print(glance_xbib(xbibs[j], longer = True) + "\n<==> NONE", file=sys.stderr)
+			xml_info = rag_procedures.glance_xbib(xbibs[j], longer = True)
+			if rawlinegroups_by_xid[j] is None:
+				print(xml_info + "\n<==> NONE", file=sys.stderr)
 			else:
-				print(glance_xbib(xbibs[j], longer = True) + "\n<==>\n"
-				+ xlinked_real_lines[j], file=sys.stderr)
+				print(xml_info + "\n<==>\n" + rawlinegroups_by_xid[j], file=sys.stderr)
 			print("="*70, file=sys.stderr)
-
-
-	#  Enfin alignement des champs sur le texte et récup ponct
-	# =========================================================
+	
+	
+	#  Enfin alignement des champs sur le texte
+	# ==========================================
 	print("---\nLINK PBIB TOKENS <=> XBIB FIELDS\n", file=sys.stderr)
-	# reconstitution séquence réelle des champs pdf, mais avec balises
 	
+	# report de chaque champ
+	bibl_found_array = []
 	
-	# pour la tokenisation des lignes via re.findall
-	re_tous = re.compile(r'\w+|[^\w\s]')
-	re_contenus = re.compile(r'\w+')
-	re_ponctuas = re.compile(r'[^\w\s]')
-	
-	# match détaillé
-	bibl_array = match_citation_fields(xlinked_real_lines, xbibs)
-	
-	for my_bibl in bibl_array:
-		
-		# OUTPUT FINAL
-		print(my_bibl)
-	
+	for j, group_of_real_lines in enumerate(rawlinegroups_by_xid):
+			
+			this_xbib = xbibs[j]
+			
+			xlabel = LABELS[j]
+			
+			toks = []
+			
+			if group_of_real_lines is None:
+				if args.debug > 1:
+					print("===:Didn't find the lines for XML bib %i (label %i)" % (j,xlabel))
+				
+				# incomplétude constatée du résultat à l'étape link_lines
+				checklist[1] = False
+				continue
+			
+			else:
+				# report des balises sur chaîne de caractères réelle
+				(my_bibl_str, success) = match_citation_fields(
+				                            group_of_real_lines,
+				                            this_xbib,
+				                            label = xlabel,
+				                            debug = args.debug
+				                           )
+				# update 3è slot checklist pour filtrage erreurs
+				checklist[2] = success
+				
+				# pour la sortie : traduction de la checkliste en "101", "111", etc
+				out_check_trigram = ""
+				for test in checklist:
+					if test:
+						out_check_trigram += "1"
+					else:
+						out_check_trigram += "0"
+				
+				# OUTPUT FINAL
+
+				
+				print(out_check_trigram+":"+my_bibl_str)
 
 # EXEMPLES DE SORTIE
 # <bibl> <author>Whittaker, J.</author>   (<date>1991</date>).   <title level="a">Graphical Models in Applied Multivariate Statistics</title>.   <publisher>Chichester: Wiley</publisher>. </bibl>
