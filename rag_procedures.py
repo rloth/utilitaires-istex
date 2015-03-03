@@ -4,6 +4,8 @@ import re
 import sys
 from lxml import etree
 
+from math import ceil
+
 
 # quelques helper regexps
 re_REF_HEADER_LINE = re.compile(r"^R ?[Ee] ?[Ff] ?[Ee] ?[Rr] ?[Ee] ?[Nn] ?[Cc] ?[Ee] ?[Ss]?s*:?\s*$")
