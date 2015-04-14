@@ -38,9 +38,11 @@ use Data::Dumper ;
 
 ################ SWITCHES + ARGS ##################
 
-# INPUT = dossier xmldir + extension des fichiers
+# INPUT = dossier xmldir + (extension des fichiers OU glob ex: "iop*.xml")
 my $xmldir = "." ;
 my $file_ext = "xml" ;
+my $file_glob = "" ;
+
 
 # ou INPUT = fichier seul
 my $FILE_IN = "" ;
@@ -80,6 +82,7 @@ my $SHOW_MISC_ATTRS = 0 ;
  GetOptions ("<>"    => \&set_file_in,  # non-option (input file path)
 			 "dir:s" => \$xmldir,       # opt str    (input dir)
 			 "ext:s" => \$file_ext,     # opt str    (input file extensions)
+			 "glob:s" => \$file_glob,   # opt str    (input file glob)
 			 
 			 "xpath:s" => \$start_elt,  # opt str    (xpath to root of counting)
 			 "nsadd:s" => \$ns_add,     # opt str    ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
@@ -106,9 +109,14 @@ if ($FILE_IN) {
 }
 # Sinon lecture dossier
 else {
-	# on part du principe qu'on a un dossier mixte : 
-	# donc on filtre sur extension $FILE_EXT
-	@xml_paths = map {decode('UTF-8', $_)} glob("$xmldir/*.$file_ext") ;
+	# on part du principe qu'on a un dossier mixte
+	# donc on filtre sur glob ou sur extension $FILE_EXT
+	if ($file_glob) {
+		@xml_paths = map {decode('UTF-8', $_)} glob("$xmldir/$file_glob") ;
+	}
+	else {
+		@xml_paths = map {decode('UTF-8', $_)} glob("$xmldir/*.$file_ext") ;
+	}
 } 
 
 my $N = scalar(@xml_paths) ;
@@ -149,10 +157,6 @@ for my $path (@xml_paths) {
 		if ($ignore_ents) {
 			s/&[^;]+;/__ENT__/g ;
 		}
-		
-		# tempo pour les pseudotei d'entrainement non-conformes
-		next if (/fileDesc xml:id/) ;
-		
 		$content .= $_ ;
 	}
 	close DOC ;
@@ -614,6 +618,7 @@ sub HELP_MESSAGE {
 |                                                          |
 |   -d --dir dossier  répertoire à lire    [défault: .]    |
 |   -e --ext "nxml"   extensions à lire    [défault: xml]  |
+|   -g --glob "iop*"  glob fichiers à lire [défault: ""]   |
 |                                                          |
 |   -x --xpath "/article/back/ref-list"    [défault: /]    | 
 |                     selecteur XPATH d'un ou plusieurs    | 
