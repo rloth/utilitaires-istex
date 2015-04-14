@@ -245,6 +245,7 @@ sub HELP_MESSAGE {
 |  -f --field 2           indice du champ contenant les        |
 |                         réponses multi                       |
 |  -x --xtabs "3,4"       indices du ou des champ(s) à croiser |
+|                         (optionnels)                         |
 |  -h --help              message d'aide                       |
 |                                                              |
 |                                                              |
