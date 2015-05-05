@@ -343,12 +343,12 @@ sub rec_xml_freq_tree {
 		# ajout des attributs type et autres comme différenciateur
 		my @attrs = $xml_elt->attributes() ;
 		
-		# on gardera toujours la valeur des attributs @type
-		# et on signalera la présence d'autres attributs
+		# on gardera les valeurs d'attributs @type, @unit et @level
+		# et, si switch --moreattrs, les noms de tout autre attribut
 		for my $attr (@attrs) {
 			if (defined $attr) {
 				my $attr_name = $attr->nodeName ;
-				if (($attr_name eq "type") || ($attr_name eq "unit")) {
+				if ($attr_name =~ /type|unit|level/) {
 					my $mon_type = $attr->value ;
 					
 					# ajout de l'attribut au tag recodé de groupement des décomptes
