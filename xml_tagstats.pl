@@ -80,12 +80,12 @@ my $SHOW_MISC_ATTRS = 0 ;
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # 
  GetOptions ("<>"    => \&set_file_in,  # non-option (input file path)
-			 "dir:s" => \$xmldir,       # opt str    (input dir)
-			 "ext:s" => \$file_ext,     # opt str    (input file extensions)
-			 "glob:s" => \$file_glob,   # opt str    (input file glob)
+			 "dir=s" => \$xmldir,       # opt str    (input dir)
+			 "ext=s" => \$file_ext,     # opt str    (input file extensions)
+			 "glob=s" => \$file_glob,   # opt str    (input file glob)
 			 
-			 "xpath:s" => \$start_elt,  # opt str    (xpath to root of counting)
-			 "nsadd:s" => \$ns_add,     # opt str    ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
+			 "xpath=s" => \$start_elt,  # opt str    (xpath to root of counting)
+			 "nsadd=s" => \$ns_add,     # opt str    ns declaration eg "tei:http://www.tei-c.org/ns/1.0"
 			 
 			 "killent" => \$ignore_ents,  # opt bool   (ignore all XML entities)
 			 "moreattrs" => \$SHOW_MISC_ATTRS,  # opt bool   (ignore all XML entities)
@@ -274,7 +274,7 @@ else        { print_freq_tree($rec_freq_hash) ; }
 # décompte récursif d'éléments
 # -----------------------------
 # renvoie un idx plat de forme ; {"xml_elt_tag" -> count}
-# use XML::Twig
+# use XML::LibXML::Node
 sub rec_xml_freq_flat {
 	my $params = shift ;
 	my $xml_elt = $params->{'xml_elt'} ;   # XML::LibXML::Node
