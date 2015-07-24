@@ -15,15 +15,19 @@ chemin=`echo $fichier | perl -pe 's/;/\;/g ; s/ /\ /g ; s/,/\,/g ; s/\(/\(/g ; s
 # chemin=`echo $fichier | perl -pe 'chomp ; $_=quotemeta($_)'`
 # echo "-->$chemin<--"
 
+# TODO vérifier au préalable article-type="other" ou article-type="research-article" ?
+
 # préparation
 front=`grep -Pazo "(?s)<front[ >].*?</front>" "$chemin"`
 
 # ici récupération
 nbodychars=`grep -Pazo "(?s)<body[ >].*?</body>" "$chemin" | wc -c`
-title=`echo $front | grep -Pazo "<(?:article-)?title[ >].*?</(?:article-)?title>" | tr '\\\r\n\t' " "`
-keywords=`echo $front | grep -Pazo "<kwd[ >].*?</kwd>" | tr '\\\r\n\t' " "`
+
+# parfois nécessaire \\\r au lieu de \r
+title=`echo $front | grep -Pazo "<(?:article-)?title[ >].*?</(?:article-)?title>" | tr -s '\r\n\t' " "`
+keywords=`echo $front | grep -Pazo "<kwd[ >].*?</kwd>" | tr -s '\r\n\t' " "`
 langue='__NA__'
-abstract=`echo $front | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr '\\\r\n\t' " "`
+abstract=`echo $front | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr -s '\r\n\t' " "`
 
 # OUTPUT
 echo -e "$fichier\t$nbodychars\t$langue\t$title\t$keywords\t$abstract"
