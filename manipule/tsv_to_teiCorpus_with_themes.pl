@@ -100,7 +100,7 @@ while (<>) {
 	}
 }
 
-warn "lignes lues $." ;
+warn "lignes lues $. ok \n" ;
 
 
 
@@ -111,28 +111,21 @@ print<<FINFOOTER ;
 FINFOOTER
 
 
+# ----------------------- fonctions ------------------------------------
+
 sub id_n_cats_to_xml_tei_entry {
 	my $id = shift ;
 	my $cats_array = shift ;
 	
-	my $out_str =<<LOCALHEADER ;
- <TEI xml:id="istex-${id}">
-  <teiHeader>
-   <profileDesc>
-    <textClass>
-LOCALHEADER
+	my $out_str ="<TEI xml:id=\"istex-${id}\"><teiHeader><profileDesc><textClass>" ;
 
 	for my $cat (@$cats_array) {
 		# <classCode scheme="WOS">EDUCATION, SCIENTIFIC DISCIPLINES</classCode>
-		$out_str .= "     <classCode scheme=\"WOS\">$cat</classCode>\n" ;
+		$out_str .= "<classCode scheme=\"WOS\">$cat</classCode>" ;
 	}
 	
-	$out_str .=<<LOCALFOOTER ;
-    </textClass>
-   </profileDesc>
-  </teiHeader>
- </TEI>
-LOCALFOOTER
+	$out_str .="</textClass></profileDesc></teiHeader></TEI>\n" ;
+
 
 	return $out_str ;
 }
