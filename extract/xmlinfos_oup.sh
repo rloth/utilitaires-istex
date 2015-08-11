@@ -24,9 +24,14 @@ front=`grep -Pazo "(?s)<front[ >].*?</front>" "$chemin"`
 nbodychars=`grep -Pazo "(?s)<body[ >].*?</body>" "$chemin" | wc -c`
 
 # parfois nécessaire \\\r au lieu de \r
+#     /!\ si plusieurs titres ils y seront tous
+#     ex: /data/oup/Cardiovascular Research, 1967-2010 (v1-v88)/
+#         cardiovascres87_suppl_1/cardiovascres87_suppl_1xml/cvq176.xml
 title=`echo $front | grep -Pazo "<(?:article-)?title[ >].*?</(?:article-)?title>" | tr -s '\r\n\t' " "`
 keywords=`echo $front | grep -Pazo "<kwd[ >].*?</kwd>" | tr -s '\r\n\t' " "`
 langue='__NA__'
+
+# /!\ si plusieurs abstracts ils y seront tous (cf. titre)
 abstract=`echo $front | grep -Pazo "(?s)<abstract[ >].*?</abstract>" | tr -s '\r\n\t' " "`
 
 # OUTPUT
